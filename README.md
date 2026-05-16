@@ -12,8 +12,8 @@
 **自动部署模块：**
 1.  **VLESS + TCP + REALITY**：SNI 偷取 `www.apple.com`，极高隐蔽性。
 2.  **Hysteria 2**：SNI 偷取 `www.bing.com`，适合高丢包环境。
-3.  **VMess + WS + Argo 隧道**：通过 Cloudflare 隧道转发，免公网 IP。
-4.  **VLESS + WS + Argo 隧道**：轻量化隧道方案。
+3.  **VMess + WS + TLS + Argo 隧道**：默认优选域名 `yg1.ygkkk.dpdns.org`。
+4.  **VLESS + WS + TLS + Argo 隧道**：默认优选域名 `yg1.ygkkk.dpdns.org`。
 
 **执行命令：**
 ```bash
@@ -23,7 +23,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/a
 ---
 
 ### 1. VLESS + WebSocket + TLS + Argo 隧道
-此脚本使用更轻量的 VLESS 协议，通过 Cloudflare Argo 隧道转发流量。
+此脚本使用更轻量的 VLESS 协议，通过 Cloudflare Argo 隧道转发流量。默认优选域名已设为 `yg1.ygkkk.dpdns.org`。
 
 **执行命令：**
 ```bash
@@ -33,7 +33,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/V
 ---
 
 ### 2. VMess + WebSocket + TLS + Argo 隧道
-此脚本通过 Cloudflare Argo 隧道转发流量，提供稳定的连接体验。
+此脚本通过 Cloudflare Argo 隧道转发流量，提供稳定的连接体验。默认优选域名已设为 `yg1.ygkkk.dpdns.org`。
 
 **执行命令：**
 ```bash

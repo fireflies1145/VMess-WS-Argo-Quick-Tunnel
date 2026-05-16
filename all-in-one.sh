@@ -197,12 +197,12 @@ EOF
     if [ -n "$argo_domain" ]; then
         if [ "$proto" == "vmess" ]; then
             local vmess_json=$(cat <<EOF
-{"v":"2","ps":"Argo-VMess","add":"www.visa.com.sg","port":"443","id":"$uuid","aid":"0","scy":"auto","net":"ws","type":"none","host":"$argo_domain","path":"$wspath","tls":"tls","sni":"$argo_domain"}
+{"v":"2","ps":"Argo-VMess","add":"yg1.ygkkk.dpdns.org","port":"443","id":"$uuid","aid":"0","scy":"auto","net":"ws","type":"none","host":"$argo_domain","path":"$wspath","tls":"tls","sni":"$argo_domain"}
 EOF
 )
             local link="vmess://$(echo -n "$vmess_json" | base64 | tr -d '\n')"
         else
-            local link="vless://$uuid@www.visa.com.sg:443?encryption=none&security=tls&sni=$argo_domain&type=ws&host=$argo_domain&path=$wspath#Argo-VLESS"
+            local link="vless://$uuid@yg1.ygkkk.dpdns.org:443?encryption=none&security=tls&sni=$argo_domain&type=ws&host=$argo_domain&path=$wspath#Argo-VLESS"
         fi
         {
             echo "--- $proto + Argo 隧道 ---"
