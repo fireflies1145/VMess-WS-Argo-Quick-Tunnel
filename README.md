@@ -6,15 +6,24 @@
 
 ## 🛠️ 脚本列表
 
-### 1. VLESS + WebSocket + TLS + Argo 隧道 (推荐)
-此脚本使用更轻量的 VLESS 协议，通过 Cloudflare Argo 隧道转发流量，能够有效解决 IP 被封锁或网络连接不畅的问题。
+### 🌟 四合一集成脚本 (All-in-One)
+集成多种主流协议，提供菜单式交互，一键部署你需要的节点。
 
-**功能特点：**
-- 自动下载并配置 Xray-core。
-- 自动获取 Cloudflared 二进制文件。
-- 自动分配随机端口或支持自定义端口。
-- 自动生成并显示 VLESS 节点链接。
-- 提供一键停止与卸载脚本。
+**包含模块：**
+1.  **VLESS + TCP + REALITY**：SNI 偷取 `www.apple.com`，极高隐蔽性。
+2.  **Hysteria 2**：SNI 偷取 `www.bing.com`，默认关闭端口跳跃，适合高丢包环境。
+3.  **VMess + WS + Argo 隧道**：通过 Cloudflare 隧道转发，免公网 IP。
+4.  **VLESS + WS + Argo 隧道**：轻量化隧道方案。
+
+**执行命令：**
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/all-in-one.sh)
+```
+
+---
+
+### 1. VLESS + WebSocket + TLS + Argo 隧道
+此脚本使用更轻量的 VLESS 协议，通过 Cloudflare Argo 隧道转发流量。
 
 **执行命令：**
 ```bash
@@ -26,13 +35,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/V
 ### 2. VMess + WebSocket + TLS + Argo 隧道
 此脚本通过 Cloudflare Argo 隧道转发流量，提供稳定的连接体验。
 
-**功能特点：**
-- 自动下载并配置 Xray-core。
-- 自动获取 Cloudflared 二进制文件。
-- 自动分配随机端口或支持自定义端口。
-- 自动生成并显示 VMess 节点链接。
-- 提供一键停止与卸载脚本。
-
 **执行命令：**
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/VMess-WS-Argo-Quick-Tunnel.sh)
@@ -42,13 +44,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/V
 
 ### 3. Hysteria 2 一键部署脚本
 Hysteria 2 是一款基于 QUIC 协议的高性能代理工具，特别适合在高丢包网络环境下使用。
-
-**功能特点：**
-- 支持 **端口跳跃 (Port Hopping)**，有效对抗协议检测。
-- 提供多种 TLS 证书获取方式：自签证书、ACME 自动申请、自定义证书。
-- 支持带宽限速配置。
-- 自动配置系统防火墙（UFW / Firewall-cmd / Iptables）。
-- 支持以 Systemd 服务运行，实现开机自启。
 
 **执行命令：**
 ```bash
@@ -65,6 +60,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/h
 
 ## 📂 项目结构
 
+- `all-in-one.sh`: 四合一集成脚本。
 - `VLESS-WS-Argo-Quick-Tunnel.sh`: VLESS + Argo 隧道一键脚本。
 - `VMess-WS-Argo-Quick-Tunnel.sh`: VMess + Argo 隧道一键脚本。
 - `hy2.sh`: Hysteria 2 一键部署脚本。
