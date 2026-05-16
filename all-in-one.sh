@@ -86,8 +86,8 @@ deploy_reality() {
     local port=$(get_random_port)
     local uuid=$(./xray uuid)
     local keys=$(./xray x25519)
-    local private_key=$(echo "$keys" | grep "Private key" | awk '{print $3}')
-    local public_key=$(echo "$keys" | grep "Public key" | awk '{print $3}')
+    local private_key=$(echo "$keys" | grep "PrivateKey:" | awk -F': ' '{print $2}')
+    local public_key=$(echo "$keys" | grep "PublicKey):" | awk -F': ' '{print $2}')
     local short_id=$(openssl rand -hex 8)
     local ip=$(get_ip)
 
