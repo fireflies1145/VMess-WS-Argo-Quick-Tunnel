@@ -437,5 +437,18 @@ printf 'Xray 日志: %s/xray.log\n' "$WORKDIR"
 printf 'Cloudflared 日志: %s/cloudflared.log\n' "$WORKDIR"
 echo "=========================================="
 
+# 安装快捷管理工具
+printf "\033[0;32m[+] 正在安装快捷管理工具...\033[0m\n"
+curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/jb.sh -o ${HOME}/jb.sh
+chmod +x ${HOME}/jb.sh
+if [ -w "/usr/local/bin" ]; then
+    sudo ln -sf ${HOME}/jb.sh /usr/local/bin/jb
+    printf "\033[0;32m[+] 快捷命令 'jb' 安装成功！输入 'jb' 即可管理节点。\033[0m\n"
+else
+    echo "alias jb='bash ${HOME}/jb.sh'" >> ${HOME}/.bashrc
+    printf "\033[0;32m[+] 快捷命令已添加至别名，请执行 'source ~/.bashrc' 后输入 'jb' 管理节点。\033[0m\n"
+fi
+echo "=========================================="
+
 # 正常退出，解绑 trap，保留后台服务
 trap - INT TERM
