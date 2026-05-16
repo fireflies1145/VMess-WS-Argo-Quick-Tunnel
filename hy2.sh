@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ==========================================
-# Hysteria 2 一键部署脚本
+# Hysteria 2 一键部署脚本 (已修复证书/防火墙Bug)
 # ==========================================
 
 WORKDIR="${WORKDIR:-${HOME}/hysteria2}"
@@ -90,7 +90,6 @@ random_port() {
 }
 
 ask() {
-    # ask <变量名> <提示> [默认值]
     local varname="$1" prompt="$2" default="${3:-}"
     if [ -t 0 ]; then
         [ -n "$default" ] && printf "%s（回车默认 %s）: " "$prompt" "$default" \
@@ -106,27 +105,26 @@ ask() {
 }
 
 configure_firewall() {
-    local port_range="$1" proto="${2:-udp}"
-    $IS_ROOT || { warn "非 root，请手动放行 ${proto}/${port_range}"; return; }
+    local raw_range="$1" proto="${2:-udp}"
+    $IS_ROOT || { warn "非 root，请手动放行 ${proto}/${raw_range}"; return; }
+    
+    # [修复Bug] 区分不同防火墙的端口段格式要求
+    local ufw_fw_range="${raw_range//:/-}"
+    local iptables_range="${raw_range//-/:}"
+
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
-        ufw allow proto "$proto" from any to any port "${port_range//:/-}" 2>/dev/null || true
-        info "UFW 规则已添加: ${port_range}/${proto}"
+        ufw allow proto "$proto" from any to any port "$ufw_fw_range" 2>/dev/null || true
+        info "UFW 规则已添加: ${ufw_fw_range}/${proto}"
     elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
-        firewall-cmd --permanent --add-port="${port_range}/${proto}" 2>/dev/null || true
+        firewall-cmd --permanent --add-port="${ufw_fw_range}/${proto}" 2>/dev/null || true
         firewall-cmd --reload 2>/dev/null || true
-        info "firewalld 规则已添加: ${port_range}/${proto}"
+        info "firewalld 规则已添加: ${ufw_fw_range}/${proto}"
     elif command -v iptables >/dev/null 2>&1; then
-        if [[ "$port_range" == *:* ]]; then
-            local s="${port_range%%:*}" e="${port_range##*:}"
-            iptables -C INPUT -p "$proto" --dport "${s}:${e}" -j ACCEPT 2>/dev/null || \
-            iptables -A INPUT -p "$proto" --dport "${s}:${e}" -j ACCEPT 2>/dev/null || true
-        else
-            iptables -C INPUT -p "$proto" --dport "$port_range" -j ACCEPT 2>/dev/null || \
-            iptables -A INPUT -p "$proto" --dport "$port_range" -j ACCEPT 2>/dev/null || true
-        fi
-        info "iptables 规则已添加: ${port_range}/${proto}"
+        iptables -C INPUT -p "$proto" --dport "$iptables_range" -j ACCEPT 2>/dev/null || \
+        iptables -A INPUT -p "$proto" --dport "$iptables_range" -j ACCEPT 2>/dev/null || true
+        info "iptables 规则已添加: ${iptables_range}/${proto}"
     else
-        warn "未检测到防火墙，请手动放行 ${proto}/${port_range}"
+        warn "未检测到防火墙，请手动放行 ${proto}/${ufw_fw_range}"
     fi
 }
 
@@ -180,7 +178,7 @@ if [ "$PORT_HOP_ENABLED" = "yes" ]; then
     ask PORT_HOP_INTERVAL "端口跳跃间隔" "$DEFAULT_HOP_INTERVAL"
     PORT_HOP_RANGE="${PORT}-${PORT_END}"
     LISTEN_ADDR=":${PORT_HOP_RANGE}"
-    FIREWALL_PORT_RANGE="${PORT}:${PORT_END}"
+    FIREWALL_PORT_RANGE="${PORT}-${PORT_END}"
     info "端口跳跃: $PORT_HOP_RANGE  间隔: $PORT_HOP_INTERVAL"
 fi
 
@@ -203,9 +201,10 @@ while true; do
             CERT_METHOD="self"; SNI="www.bing.com"; INSECURE="1"
             if [ ! -f "${WORKDIR}/server.crt" ] || [ ! -f "${WORKDIR}/server.key" ]; then
                 info "生成自签证书 (CN: $SNI)..."
+                # [修复Bug] 增加 subjectAltName，规避 Go 原生证书校验报错
                 openssl req -newkey rsa:2048 -nodes -keyout "${WORKDIR}/server.key" \
                     -x509 -days 3650 -out "${WORKDIR}/server.crt" \
-                    -subj "/CN=${SNI}" 2>/dev/null || fail_exit "自签证书生成失败"
+                    -subj "/CN=${SNI}" -addext "subjectAltName = DNS:${SNI}" 2>/dev/null || fail_exit "自签证书生成失败"
                 chmod 600 "${WORKDIR}/server.key" "${WORKDIR}/server.crt"
             else
                 info "复用已有自签证书"
@@ -298,7 +297,7 @@ section "6/7 生成配置文件"
 PASSWORD=$(openssl rand -hex 16)
 info "认证密码: $PASSWORD"
 
-# TLS 块
+# [修复Bug] ACME 应作为顶层配置块，且不再嵌套于 tls 内
 case "$CERT_METHOD" in
     self|custom)
         TLS_BLOCK="tls:
@@ -306,29 +305,25 @@ case "$CERT_METHOD" in
   key: ${KEY_FILE}" ;;
     acme)
         if [ "$ACME_LISTEN" = ":80" ]; then
-            TLS_BLOCK="tls:
-  acme:
-    domains:
-      - ${ACME_DOMAIN}
-    email: ${ACME_EMAIL}
-    listen: ${ACME_LISTEN}
-    type: http-01"
+            TLS_BLOCK="acme:
+  domains:
+    - ${ACME_DOMAIN}
+  email: ${ACME_EMAIL}
+  listen: ${ACME_LISTEN}
+  type: http-01"
         else
-            TLS_BLOCK="tls:
-  acme:
-    domains:
-      - ${ACME_DOMAIN}
-    email: ${ACME_EMAIL}"
+            TLS_BLOCK="acme:
+  domains:
+    - ${ACME_DOMAIN}
+  email: ${ACME_EMAIL}"
         fi ;;
 esac
 
-# 限速块
 SPEED_BLOCK=""
 [ "$LIMIT_SPEED" = "yes" ] && SPEED_BLOCK="speed:
   up: \"${SPEED_UP} mbps\"
   down: \"${SPEED_DOWN} mbps\""
 
-# 端口跳跃块
 HOP_BLOCK=""
 [ "$PORT_HOP_ENABLED" = "yes" ] && HOP_BLOCK="hopInterval: ${PORT_HOP_INTERVAL}"
 
@@ -403,7 +398,6 @@ EOF
         fail_exit "服务启动失败，请查看上方日志"
     fi
 else
-    # 非 root / 无 systemd：后台运行
     nohup "${WORKDIR}/hysteria" server --config "${WORKDIR}/config.yaml" \
         > "${WORKDIR}/hysteria.log" 2>&1 &
     echo $! > "${WORKDIR}/hysteria.pid"
@@ -416,10 +410,6 @@ else
     fi
 fi
 
-# ==========================================
-# 输出分享信息
-# ==========================================
-# URI 主端口始终用单个起始端口，跳跃范围用 mport 参数
 SHARE_PORT="$PORT"
 
 if [ "$CERT_METHOD" = "acme" ]; then
@@ -429,14 +419,11 @@ else
     INSECURE_PARAM=$([ "$INSECURE" = "1" ] && echo "&insecure=1" || echo "")
 fi
 
-# 端口跳跃参数
 MPORT_PARAM=""
 [ "$PORT_HOP_ENABLED" = "yes" ] && MPORT_PARAM="&mport=${PORT_HOP_RANGE}"
 
-# URI 编码（简单处理）
 ENC_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${PASSWORD}'))" 2>/dev/null || echo "$PASSWORD")
 
-# IPv6 地址加方括号
 SHARE_HOST="$PUBLIC_IP"
 [[ "$PUBLIC_IP" =~ : ]] && SHARE_HOST="[${PUBLIC_IP}]"
 
