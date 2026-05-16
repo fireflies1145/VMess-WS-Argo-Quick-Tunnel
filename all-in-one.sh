@@ -237,3 +237,16 @@ cat "$INFO_FILE"
 echo -e "${CYAN}==========================================${NC}"
 echo -e "${YELLOW}所有节点信息已保存至: $INFO_FILE${NC}"
 echo -e "${CYAN}==========================================${NC}"
+
+# 安装快捷管理工具
+info "正在安装快捷管理工具..."
+curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/jb.sh -o ${HOME}/jb.sh
+chmod +x ${HOME}/jb.sh
+if [ -w "/usr/local/bin" ]; then
+    sudo ln -sf ${HOME}/jb.sh /usr/local/bin/jb
+    info "快捷命令 'jb' 安装成功！输入 'jb' 即可管理节点。"
+else
+    echo "alias jb='bash ${HOME}/jb.sh'" >> ${HOME}/.bashrc
+    info "快捷命令已添加至别名，请执行 'source ~/.bashrc' 后输入 'jb' 管理节点。"
+fi
+echo -e "${CYAN}==========================================${NC}"

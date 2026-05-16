@@ -2,14 +2,14 @@
 
 > **🤖 AI 驱动开发声明**：本项目由 **DeepSeek**, **Gemini**, **GPT-5.5-think**, **Claude-sonnet-4.6** 以及 **Manus AI Agent** 共同协作完成。从核心逻辑编写、多架构适配到自动化测试与文档重构，均由顶尖 AI 模型驱动，旨在探索 AI 在网络自动化部署领域的无限可能。
 
-本项目提供了一系列由 AI 辅助编写的科学上网一键部署脚本，旨在为用户提供最简便、高效的节点搭建体验。所有脚本均经过优化，支持多种架构，并具备自动环境检查与依赖安装功能。
+本项目提供了一系列由 AI 辅助编写的科学上网一键部署脚本，旨在为用户提供最简便、高效的节点搭建体验。
 
 ---
 
 ## 🛠️ 脚本列表
 
 ### 🌟 四合一全自动部署脚本 (All-in-One)
-**真正的“一键”部署**：复制命令并执行后，脚本将全自动依次部署四个主流协议节点，无需任何手动干预。
+**真正的“一键”部署**：复制命令并执行后，脚本将全自动依次部署四个主流协议节点，并**自动安装快捷管理工具 `jb`**。
 
 **自动部署模块：**
 1.  **VLESS + TCP + REALITY**：SNI 偷取 `www.apple.com`，极高隐蔽性。
@@ -24,8 +24,24 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/a
 
 ---
 
+## ⚡ 快捷管理工具 (jb)
+
+部署完成后，你可以直接在终端输入 `jb` 来管理你的节点：
+
+- **查看节点**：快速显示所有已部署节点的订阅链接。
+- **状态检查**：实时查看 Xray/Hysteria/Argo 服务的运行状态。
+- **一键停止**：快速关闭所有后台运行的代理服务。
+- **一键卸载**：彻底清理所有工作目录、配置文件及日志。
+
+**手动安装/更新快捷工具：**
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/jb.sh) install
+```
+
+---
+
 ### 1. VLESS + WebSocket + TLS + Argo 隧道
-此脚本使用更轻量的 VLESS 协议，通过 Cloudflare Argo 隧道转发流量。默认优选域名已设为 `yg1.ygkkk.dpdns.org`。
+此脚本使用更轻量的 VLESS 协议，通过 Cloudflare Argo 隧道转发流量。
 
 **执行命令：**
 ```bash
@@ -35,7 +51,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/V
 ---
 
 ### 2. VMess + WebSocket + TLS + Argo 隧道
-此脚本通过 Cloudflare Argo 隧道转发流量，提供稳定的连接体验。默认优选域名已设为 `yg1.ygkkk.dpdns.org`。
+此脚本通过 Cloudflare Argo 隧道转发流量，提供稳定的连接体验。
 
 **执行命令：**
 ```bash
@@ -63,6 +79,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/h
 ## 📂 项目结构
 
 - `all-in-one.sh`: 四合一全自动部署脚本。
+- `jb.sh`: 统一快捷管理工具。
 - `VLESS-WS-Argo-Quick-Tunnel.sh`: VLESS + Argo 隧道一键脚本。
 - `VMess-WS-Argo-Quick-Tunnel.sh`: VMess + Argo 隧道一键脚本。
 - `hy2.sh`: Hysteria 2 一键部署脚本。
