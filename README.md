@@ -6,12 +6,12 @@
 
 ## 🛠️ 脚本列表
 
-### 🌟 四合一集成脚本 (All-in-One)
-集成多种主流协议，提供菜单式交互，一键部署你需要的节点。
+### 🌟 四合一全自动部署脚本 (All-in-One)
+**真正的“一键”部署**：复制命令并执行后，脚本将全自动依次部署四个主流协议节点，无需任何手动干预。
 
-**包含模块：**
+**自动部署模块：**
 1.  **VLESS + TCP + REALITY**：SNI 偷取 `www.apple.com`，极高隐蔽性。
-2.  **Hysteria 2**：SNI 偷取 `www.bing.com`，默认关闭端口跳跃，适合高丢包环境。
+2.  **Hysteria 2**：SNI 偷取 `www.bing.com`，适合高丢包环境。
 3.  **VMess + WS + Argo 隧道**：通过 Cloudflare 隧道转发，免公网 IP。
 4.  **VLESS + WS + Argo 隧道**：轻量化隧道方案。
 
@@ -60,7 +60,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/h
 
 ## 📂 项目结构
 
-- `all-in-one.sh`: 四合一集成脚本。
+- `all-in-one.sh`: 四合一全自动部署脚本。
 - `VLESS-WS-Argo-Quick-Tunnel.sh`: VLESS + Argo 隧道一键脚本。
 - `VMess-WS-Argo-Quick-Tunnel.sh`: VMess + Argo 隧道一键脚本。
 - `hy2.sh`: Hysteria 2 一键部署脚本。

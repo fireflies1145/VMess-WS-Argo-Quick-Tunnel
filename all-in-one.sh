@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ==========================================
-# 科学上网四合一集成脚本
+# 科学上网四合一全自动部署脚本
 # ==========================================
 
 # 颜色定义
@@ -16,7 +16,8 @@ NC='\033[0m'
 
 # 基础配置
 ARCH="$(uname -m)"
-READ_TIMEOUT=30
+INFO_FILE="${HOME}/all_nodes_info.txt"
+: > "$INFO_FILE"
 
 # 打印信息函数
 info() { printf "${GREEN}[+]${NC} %s\n" "$*"; }
@@ -58,28 +59,12 @@ get_ip() {
     curl -s --connect-timeout 5 https://api.ipify.org || echo "127.0.0.1"
 }
 
-# 菜单界面
-show_menu() {
-    clear
-    echo -e "${CYAN}==========================================${NC}"
-    echo -e "${PURPLE}       科学上网四合一集成脚本           ${NC}"
-    echo -e "${CYAN}==========================================${NC}"
-    echo -e "${GREEN} 1.${NC} 部署 VLESS + TCP + REALITY (偷 Apple)"
-    echo -e "${GREEN} 2.${NC} 部署 Hysteria 2 (偷 Bing, 无跳跃)"
-    echo -e "${GREEN} 3.${NC} 部署 VMess + WS + Argo 隧道"
-    echo -e "${GREEN} 4.${NC} 部署 VLESS + WS + Argo 隧道"
-    echo -e "${RED} 0.${NC} 退出脚本"
-    echo -e "${CYAN}==========================================${NC}"
-    printf "请选择 [0-4]: "
-}
-
 # --- 模块 1: VLESS + TCP + REALITY ---
 deploy_reality() {
-    info "正在部署 VLESS + TCP + REALITY..."
+    info "正在部署 [1/4] VLESS + TCP + REALITY (偷 Apple)..."
     local workdir="${HOME}/vless-reality"
     mkdir -p "$workdir" && cd "$workdir"
     
-    # 下载 Xray
     curl -fsSL "https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_PKG}" -o xray.zip
     unzip -qo xray.zip xray geoip.dat geosite.dat && chmod +x xray && rm xray.zip
 
@@ -117,13 +102,22 @@ EOF
     echo $! > xray.pid
     
     local link="vless://$uuid@$ip:$port?encryption=none&security=reality&sni=www.apple.com&fp=chrome&pbk=$public_key&sid=$short_id&flow=xtls-rprx-vision#REALITY-Apple"
-    echo -e "\n${GREEN}部署成功！${NC}"
-    echo -e "节点链接: ${BLUE}$link${NC}"
+    {
+        echo "--- VLESS + TCP + REALITY ---"
+        echo "Address: $ip"
+        echo "Port: $port"
+        echo "UUID: $uuid"
+        echo "PublicKey: $public_key"
+        echo "ShortID: $short_id"
+        echo "SNI: www.apple.com"
+        echo "Link: $link"
+        echo ""
+    } >> "$INFO_FILE"
 }
 
 # --- 模块 2: Hysteria 2 ---
 deploy_hy2() {
-    info "正在部署 Hysteria 2..."
+    info "正在部署 [2/4] Hysteria 2 (偷 Bing)..."
     local workdir="${HOME}/hy2"
     mkdir -p "$workdir" && cd "$workdir"
     
@@ -134,7 +128,6 @@ deploy_hy2() {
     local password=$(openssl rand -hex 16)
     local ip=$(get_ip)
     
-    # 生成自签证书
     openssl req -newkey rsa:2048 -nodes -keyout server.key -x509 -days 3650 -out server.crt -subj "/CN=www.bing.com" >/dev/null 2>&1
 
     cat > config.yaml <<EOF
@@ -151,14 +144,22 @@ EOF
     echo $! > hy2.pid
     
     local link="hysteria2://$password@$ip:$port/?sni=www.bing.com&insecure=1#Hy2-Bing"
-    echo -e "\n${GREEN}部署成功！${NC}"
-    echo -e "节点链接: ${BLUE}$link${NC}"
+    {
+        echo "--- Hysteria 2 ---"
+        echo "Address: $ip"
+        echo "Port: $port"
+        echo "Password: $password"
+        echo "SNI: www.bing.com"
+        echo "Link: $link"
+        echo ""
+    } >> "$INFO_FILE"
 }
 
-# --- 模块 3 & 4: Argo 隧道 (通用逻辑) ---
+# --- 模块 3 & 4: Argo 隧道 ---
 deploy_argo() {
-    local proto="$1" # vmess or vless
-    info "正在部署 $proto + Argo 隧道..."
+    local proto="$1"
+    local step="$2"
+    info "正在部署 [$step/4] $proto + Argo 隧道..."
     local workdir="${HOME}/${proto}-argo"
     mkdir -p "$workdir" && cd "$workdir"
     
@@ -171,7 +172,6 @@ deploy_argo() {
     local uuid=$(./xray uuid)
     local wspath="/$(openssl rand -hex 8)"
     
-    # 配置文件
     if [ "$proto" == "vmess" ]; then
         cat > config.json <<EOF
 {"log":{"loglevel":"warning"},"inbounds":[{"listen":"127.0.0.1","port":$port,"protocol":"vmess","settings":{"clients":[{"id":"$uuid"}]},"streamSettings":{"network":"ws","wsSettings":{"path":"$wspath"}}}],"outbounds":[{"protocol":"freedom"}]}
@@ -187,7 +187,6 @@ EOF
     nohup ./cloudflared tunnel --url "http://127.0.0.1:$port" > cf.log 2>&1 &
     echo $! > cf.pid
 
-    info "等待 Argo 域名分配..."
     local argo_domain=""
     for i in {1..60}; do
         argo_domain=$(grep -oE 'https://[-a-zA-Z0-9.]+\.trycloudflare\.com' cf.log | head -n 1 | sed 's#https://##' || true)
@@ -195,34 +194,46 @@ EOF
         sleep 1
     done
 
-    if [ -z "$argo_domain" ]; then err "Argo 域名获取失败"; return; fi
-
-    if [ "$proto" == "vmess" ]; then
-        local vmess_json=$(cat <<EOF
+    if [ -n "$argo_domain" ]; then
+        if [ "$proto" == "vmess" ]; then
+            local vmess_json=$(cat <<EOF
 {"v":"2","ps":"Argo-VMess","add":"www.visa.com.sg","port":"443","id":"$uuid","aid":"0","scy":"auto","net":"ws","type":"none","host":"$argo_domain","path":"$wspath","tls":"tls","sni":"$argo_domain"}
 EOF
 )
-        local link="vmess://$(echo -n "$vmess_json" | base64 | tr -d '\n')"
+            local link="vmess://$(echo -n "$vmess_json" | base64 | tr -d '\n')"
+        else
+            local link="vless://$uuid@www.visa.com.sg:443?encryption=none&security=tls&sni=$argo_domain&type=ws&host=$argo_domain&path=$wspath#Argo-VLESS"
+        fi
+        {
+            echo "--- $proto + Argo 隧道 ---"
+            echo "Argo Domain: $argo_domain"
+            echo "UUID: $uuid"
+            echo "Path: $wspath"
+            echo "Link: $link"
+            echo ""
+        } >> "$INFO_FILE"
     else
-        local link="vless://$uuid@www.visa.com.sg:443?encryption=none&security=tls&sni=$argo_domain&type=ws&host=$argo_domain&path=$wspath#Argo-VLESS"
+        warn "$proto Argo 域名获取失败"
     fi
-    
-    echo -e "\n${GREEN}部署成功！${NC}"
-    echo -e "节点链接: ${BLUE}$link${NC}"
 }
 
-# 主循环
-while true; do
-    show_menu
-    read -r choice || break
-    case "$choice" in
-        1) deploy_reality ;;
-        2) deploy_hy2 ;;
-        3) deploy_argo "vmess" ;;
-        4) deploy_argo "vless" ;;
-        0) exit 0 ;;
-        *) warn "无效选择" ;;
-    esac
-    echo -e "\n按回车键返回菜单..."
-    read -r
-done
+# 执行全自动部署
+clear
+echo -e "${CYAN}==========================================${NC}"
+echo -e "${PURPLE}       科学上网四合一全自动部署           ${NC}"
+echo -e "${CYAN}==========================================${NC}"
+echo -e "${YELLOW}正在开始全自动部署，请稍候...${NC}"
+echo ""
+
+deploy_reality
+deploy_hy2
+deploy_argo "vmess" "3"
+deploy_argo "vless" "4"
+
+echo -e "${CYAN}==========================================${NC}"
+echo -e "${GREEN}             部署完成！                 ${NC}"
+echo -e "${CYAN}==========================================${NC}"
+cat "$INFO_FILE"
+echo -e "${CYAN}==========================================${NC}"
+echo -e "${YELLOW}所有节点信息已保存至: $INFO_FILE${NC}"
+echo -e "${CYAN}==========================================${NC}"
