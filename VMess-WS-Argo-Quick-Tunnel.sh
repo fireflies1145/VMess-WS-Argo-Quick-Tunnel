@@ -429,6 +429,12 @@ echo "=========================================="
 echo "部署完成"
 echo "=========================================="
 cat info.txt
+# 将信息追加到全局记录文件
+{
+    echo "--- VMess + Argo 隧道 (独立部署) ---"
+    cat info.txt
+    echo ""
+} >> "${HOME}/all_nodes_info.txt"
 echo "=========================================="
 printf '工作目录: %s\n' "$WORKDIR"
 printf '停止节点: %s/stop.sh\n' "$WORKDIR"

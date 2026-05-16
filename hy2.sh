@@ -645,6 +645,12 @@ fi
 
 echo ""
 info "信息已保存至: ${WORKDIR}/info.txt"
+# 将信息追加到全局记录文件
+{
+    echo "--- Hysteria 2 (独立部署) ---"
+    cat "${WORKDIR}/info.txt"
+    echo ""
+} >> "${HOME}/all_nodes_info.txt"
 
 # 安装快捷管理工具
 printf "\033[0;32m[+] 正在安装快捷管理工具...\033[0m\n"
