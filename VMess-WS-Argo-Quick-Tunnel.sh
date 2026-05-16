@@ -146,14 +146,14 @@ USER_PORT=""
 
 while true; do
     if [ -t 0 ]; then
-        printf '请输入监听端口 (10000-59999，%d秒无操作自动随机): ' "$READ_TIMEOUT"
+        printf '请输入监听端口 (10000-59999，直接回车或%d秒无操作将自动随机): ' "$READ_TIMEOUT"
         read -t "$READ_TIMEOUT" -r USER_PORT || true
-        echo ""  # 超时后补换行
     else
         echo "非交互环境，自动分配随机端口..."
     fi
 
     if [ -z "$USER_PORT" ]; then
+        echo "" # 补换行
         PORT=$(random_port) || fail_exit "无法自动分配空闲端口"
         printf '已分配随机端口: %s\n' "$PORT"
         break
