@@ -129,7 +129,7 @@ random_port() {
     for i in $(seq 1 200); do
         # 使用 /dev/urandom 生成更均匀的随机数（如果有）
         if [ -r /dev/urandom ]; then
-            port=$(( (0x$(od -An -N2 -tu2 /dev/urandom) % 50000) + 10000 ))
+            port=$(( ( $(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 50000) + 10000 ))
         else
             port=$(( (RANDOM << 15 | RANDOM) % 50000 + 10000 ))
         fi
