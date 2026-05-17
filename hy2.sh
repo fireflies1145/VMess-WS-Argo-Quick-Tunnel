@@ -522,7 +522,7 @@ MPORT_PARAM=""
 if [ "$PORT_HOP_ENABLED" = "yes" ]; then
     # 去掉间隔中的 "s"（如 "25s" → "25"）
     HOP_INT_NUM="${PORT_HOP_INTERVAL//s/}"
-    MPORT_PARAM="&mport=${PORT_HOP_RANGE}&hop_interval=${HOP_INT_NUM}"
+    MPORT_PARAM="&mport=${PORT_HOP_RANGE}&mportHopInt=${HOP_INT_NUM}"
 fi
 
 # 密码不需要 URL 编码（纯 hex，无特殊字符）
