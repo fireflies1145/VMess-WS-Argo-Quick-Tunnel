@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # ==========================================
-# 科学上网四合一全自动部署脚本
+# 科学上网四合一全自动部署脚本 (Pro 版)
+# 特性：Systemd 管理, 并发下载, 多系统适配
 # ==========================================
 
 # 颜色定义
@@ -24,6 +25,25 @@ info() { printf "${GREEN}[+]${NC} %s\n" "$*"; }
 warn() { printf "${YELLOW}[!]${NC} %s\n" "$*"; }
 err() { printf "${RED}[x]${NC} %s\n" "$*"; }
 
+# 系统检查与依赖安装
+install_dependencies() {
+    info "正在检查系统环境并安装依赖..."
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "$ID" in
+            ubuntu|debian)
+                sudo apt update -y && sudo apt install -y curl unzip openssl grep sed base64 coreutils procps jq
+                ;;
+            centos|rhel|almalinux|rocky)
+                sudo yum install -y curl unzip openssl grep sed base64 coreutils procps jq
+                ;;
+            *)
+                warn "未知的发行版: $ID，请手动确保依赖已安装 (curl, unzip, openssl, jq)"
+                ;;
+        esac
+    fi
+}
+
 # 架构检查
 case "$ARCH" in
     x86_64|amd64) XRAY_PKG="Xray-linux-64.zip"; CF_BIN="cloudflared-linux-amd64"; HY_BIN="hysteria-linux-amd64" ;;
@@ -31,37 +51,51 @@ case "$ARCH" in
     *) err "不支持的架构: $ARCH"; exit 1 ;;
 esac
 
-# 依赖检查
-need_cmd() {
-    command -v "$1" >/dev/null 2>&1 || { err "缺少依赖: $1"; exit 1; }
-}
-for cmd in curl unzip openssl grep sed base64 tr head; do need_cmd "$cmd"; done
-
-# 端口检测
-check_port() {
-    local port="$1"
-    (echo >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1 && return 0
-    command -v ss >/dev/null 2>&1 && ss -tlnp 2>/dev/null | grep -q ":$port " && return 0
-    return 1
-}
-
-# 随机端口
+# 端口检测与分配
 get_random_port() {
     local port
     while true; do
-        port=$(( ( $(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 50000) + 10000 ))
-        ! check_port "$port" && echo "$port" && return 0
+        port=$(( ( RANDOM % 50000) + 10000 ))
+        if ! ss -tln | grep -q ":$port "; then
+            echo "$port" && return 0
+        fi
     done
 }
 
-# 获取公网 IP
 get_ip() {
     curl -s --connect-timeout 5 https://api.ipify.org || echo "127.0.0.1"
 }
 
+# 创建 Systemd 服务函数
+create_service() {
+    local name="$1"
+    local exec_cmd="$2"
+    local workdir="$3"
+    
+    cat <<EOF | sudo tee /etc/systemd/system/${name}.service >/dev/null
+[Unit]
+Description=${name} Service
+After=network.target
+
+[Service]
+Type=simple
+User=$(whoami)
+WorkingDirectory=${workdir}
+ExecStart=${exec_cmd}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable "${name}"
+    sudo systemctl restart "${name}"
+}
+
 # --- 模块 1: VLESS + TCP + REALITY ---
 deploy_reality() {
-    info "正在部署 [1/4] VLESS + TCP + REALITY (偷 Apple)..."
+    info "正在部署 [1/4] VLESS + TCP + REALITY..."
     local workdir="${HOME}/vless-reality"
     mkdir -p "$workdir" && cd "$workdir"
     
@@ -98,18 +132,11 @@ deploy_reality() {
     "outbounds": [{"protocol": "freedom"}]
 }
 EOF
-    nohup ./xray run > xray.log 2>&1 &
-    echo $! > xray.pid
+    create_service "xray-reality" "${workdir}/xray run -c ${workdir}/config.json" "$workdir"
     
     local link="vless://$uuid@$ip:$port?encryption=none&security=reality&sni=www.apple.com&fp=chrome&pbk=$public_key&sid=$short_id&flow=xtls-rprx-vision#REALITY-Apple"
     {
         echo "--- VLESS + TCP + REALITY ---"
-        echo "Address: $ip"
-        echo "Port: $port"
-        echo "UUID: $uuid"
-        echo "PublicKey: $public_key"
-        echo "ShortID: $short_id"
-        echo "SNI: www.apple.com"
         echo "Link: $link"
         echo ""
     } >> "$INFO_FILE"
@@ -117,7 +144,7 @@ EOF
 
 # --- 模块 2: Hysteria 2 ---
 deploy_hy2() {
-    info "正在部署 [2/4] Hysteria 2 (偷 Bing)..."
+    info "正在部署 [2/4] Hysteria 2..."
     local workdir="${HOME}/hy2"
     mkdir -p "$workdir" && cd "$workdir"
     
@@ -140,16 +167,11 @@ auth:
   password: $password
 ignoreClientBandwidth: true
 EOF
-    nohup ./hysteria server --config config.yaml > hy2.log 2>&1 &
-    echo $! > hy2.pid
+    create_service "hy2" "${workdir}/hysteria server --config ${workdir}/config.yaml" "$workdir"
     
     local link="hysteria2://$password@$ip:$port/?sni=www.bing.com&insecure=1#Hy2-Bing"
     {
         echo "--- Hysteria 2 ---"
-        echo "Address: $ip"
-        echo "Port: $port"
-        echo "Password: $password"
-        echo "SNI: www.bing.com"
         echo "Link: $link"
         echo ""
     } >> "$INFO_FILE"
@@ -163,10 +185,9 @@ deploy_argo() {
     local workdir="${HOME}/${proto}-argo"
     mkdir -p "$workdir" && cd "$workdir"
     
-    curl -fsSL "https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_PKG}" -o xray.zip
-    unzip -qo xray.zip xray geoip.dat geosite.dat && chmod +x xray && rm xray.zip
-    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/${CF_BIN}" -o cloudflared
-    chmod +x cloudflared
+    # 避免重复下载
+    [ -f xray ] || { curl -fsSL "https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_PKG}" -o xray.zip && unzip -qo xray.zip xray && chmod +x xray && rm xray.zip; }
+    [ -f cloudflared ] || { curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/${CF_BIN}" -o cloudflared && chmod +x cloudflared; }
 
     local port=$(get_random_port)
     local uuid=$(./xray uuid)
@@ -182,11 +203,12 @@ EOF
 EOF
     fi
 
-    nohup ./xray run > xray.log 2>&1 &
-    echo $! > xray.pid
+    create_service "xray-${proto}-argo" "${workdir}/xray run -c ${workdir}/config.json" "$workdir"
+    
+    # 启动 cloudflared 并捕获域名
     nohup ./cloudflared tunnel --url "http://127.0.0.1:$port" > cf.log 2>&1 &
-    echo $! > cf.pid
-
+    local cf_pid=$!
+    
     local argo_domain=""
     for i in {1..60}; do
         argo_domain=$(grep -oE 'https://[-a-zA-Z0-9.]+\.trycloudflare\.com' cf.log | head -n 1 | sed 's#https://##' || true)
@@ -206,47 +228,30 @@ EOF
         fi
         {
             echo "--- $proto + Argo 隧道 ---"
-            echo "Argo Domain: $argo_domain"
-            echo "UUID: $uuid"
-            echo "Path: $wspath"
             echo "Link: $link"
             echo ""
         } >> "$INFO_FILE"
+        # 转为 systemd 管理 cloudflared
+        kill $cf_pid || true
+        create_service "cf-${proto}-argo" "${workdir}/cloudflared tunnel --url http://127.0.0.1:$port" "$workdir"
     else
         warn "$proto Argo 域名获取失败"
     fi
 }
 
-# 执行全自动部署
-clear
-echo -e "${CYAN}==========================================${NC}"
-echo -e "${PURPLE}       科学上网四合一全自动部署           ${NC}"
-echo -e "${CYAN}==========================================${NC}"
-echo -e "${YELLOW}正在开始全自动部署，请稍候...${NC}"
-echo ""
-
+# 执行
+install_dependencies
 deploy_reality
 deploy_hy2
 deploy_argo "vmess" "3"
 deploy_argo "vless" "4"
 
-echo -e "${CYAN}==========================================${NC}"
-echo -e "${GREEN}             部署完成！                 ${NC}"
-echo -e "${CYAN}==========================================${NC}"
-cat "$INFO_FILE"
-echo -e "${CYAN}==========================================${NC}"
-echo -e "${YELLOW}所有节点信息已保存至: $INFO_FILE${NC}"
-echo -e "${CYAN}==========================================${NC}"
+# 安装管理工具
+info "正在安装管理工具 'jb'..."
+sudo cp /home/ubuntu/jiaoben/jb.sh /usr/local/bin/jb
+sudo chmod +x /usr/local/bin/jb
 
-# 安装快捷管理工具
-info "正在安装快捷管理工具..."
-curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/jb.sh -o ${HOME}/jb.sh
-chmod +x ${HOME}/jb.sh
-if [ -w "/usr/local/bin" ]; then
-    sudo ln -sf ${HOME}/jb.sh /usr/local/bin/jb
-    info "快捷命令 'jb' 安装成功！输入 'jb' 即可管理节点。"
-else
-    echo "alias jb='bash ${HOME}/jb.sh'" >> ${HOME}/.bashrc
-    info "快捷命令已添加至别名，请执行 'source ~/.bashrc' 后输入 'jb' 管理节点。"
-fi
-echo -e "${CYAN}==========================================${NC}"
+clear
+echo -e "${GREEN}部署完成！所有节点已通过 Systemd 运行。${NC}"
+cat "$INFO_FILE"
+echo -e "${YELLOW}输入 'jb' 即可管理服务。${NC}"
