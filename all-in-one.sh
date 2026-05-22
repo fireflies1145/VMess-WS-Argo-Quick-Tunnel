@@ -32,10 +32,10 @@ install_dependencies() {
         . /etc/os-release
         case "$ID" in
             ubuntu|debian)
-                sudo apt update -y && sudo apt install -y curl unzip openssl grep sed base64 coreutils procps jq
+                sudo apt update -y && sudo apt install -y curl unzip openssl grep sed coreutils procps jq
                 ;;
             centos|rhel|almalinux|rocky)
-                sudo yum install -y curl unzip openssl grep sed base64 coreutils procps jq
+                sudo yum install -y curl unzip openssl grep sed coreutils procps jq
                 ;;
             *)
                 warn "未知的发行版: $ID，请手动确保依赖已安装 (curl, unzip, openssl, jq)"
