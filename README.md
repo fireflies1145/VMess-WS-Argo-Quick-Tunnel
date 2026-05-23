@@ -248,6 +248,116 @@ username ALL=(ALL) NOPASSWD: /usr/bin/systemctl, /usr/bin/apt, /usr/bin/yum
 - [IMPROVEMENTS.md](IMPROVEMENTS.md) - 改进日志和使用指南
 - [SECURITY.md](SECURITY.md) - 安全最佳实践
 
+## 🗑️ 卸载方法
+
+### 快速卸载
+
+**最简单的方式 - 使用卸载脚本：**
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/uninstall.sh)
+```
+
+**或者本地卸载：**
+
+```bash
+# 克隆项目
+git clone https://github.com/fireflies1145/jiaoben.git
+cd jiaoben
+
+# 赋予执行权限
+chmod +x uninstall.sh
+
+# 执行卸载
+bash uninstall.sh
+```
+
+### 卸载脚本功能
+
+卸载脚本会自动执行以下操作：
+
+1. ✅ **停止所有服务** - 停止 REALITY、Hysteria 2、VMess Argo、VLESS Argo 等所有服务
+2. ✅ **删除服务文件** - 删除 Systemd 服务配置文件
+3. ✅ **删除工作目录** - 删除 `~/proxy-nodes` 目录及所有配置
+4. ✅ **删除管理工具** - 删除 `/usr/local/bin/jb` 命令
+5. ✅ **清理残留进程** - 杀死所有残留的 xray、hysteria、cloudflared 进程
+
+### 手动卸载
+
+如果你需要手动卸载，请按以下步骤操作：
+
+#### 1. 停止所有服务
+
+```bash
+# 停止 REALITY 服务
+sudo systemctl stop xray-reality
+sudo systemctl disable xray-reality
+
+# 停止 Hysteria 2 服务
+sudo systemctl stop hy2
+sudo systemctl disable hy2
+
+# 停止 Argo 隧道服务
+sudo systemctl stop xray-vmess-argo cf-vmess-argo xray-vless-argo cf-vless-argo
+sudo systemctl disable xray-vmess-argo cf-vmess-argo xray-vless-argo cf-vless-argo
+```
+
+#### 2. 删除服务文件
+
+```bash
+sudo rm -f /etc/systemd/system/xray-reality.service
+sudo rm -f /etc/systemd/system/hy2.service
+sudo rm -f /etc/systemd/system/xray-*-argo.service
+sudo rm -f /etc/systemd/system/cf-*-argo.service
+sudo systemctl daemon-reload
+```
+
+#### 3. 删除工作目录
+
+```bash
+rm -rf ~/proxy-nodes
+```
+
+#### 4. 删除管理工具
+
+```bash
+sudo rm -f /usr/local/bin/jb
+```
+
+#### 5. 清理残留进程
+
+```bash
+pkill -9 xray
+pkill -9 hysteria
+pkill -9 cloudflared
+```
+
+### 验证卸载
+
+卸载完成后，你可以验证：
+
+```bash
+# 检查服务是否已停止
+sudo systemctl list-units --type=service | grep -E "xray|hy2|cf-"
+
+# 检查工作目录是否已删除
+ls -la ~/proxy-nodes 2>/dev/null || echo "工作目录已删除"
+
+# 检查管理工具是否已删除
+which jb || echo "管理工具已删除"
+
+# 检查进程是否已清理
+ps aux | grep -E "xray|hysteria|cloudflared" | grep -v grep || echo "所有进程已清理"
+```
+
+### 重新部署
+
+卸载后如需重新部署，可以使用以下命令：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/all-in-one.sh)
+```
+
 ## 🐛 故障排除
 
 ### 部署失败
