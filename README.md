@@ -62,6 +62,20 @@ jiaoben/
 
 ### 一键部署
 
+**最简单的方式 - 直接执行：**
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/all-in-one.sh)
+```
+
+**或者使用 wget：**
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/fireflies1145/jiaoben/main/all-in-one.sh)
+```
+
+**本地部署方式：**
+
 ```bash
 # 克隆项目
 git clone https://github.com/fireflies1145/jiaoben.git
@@ -71,10 +85,12 @@ cd jiaoben
 chmod +x all-in-one.sh
 
 # 执行部署
-./all-in-one.sh
+bash all-in-one.sh
 ```
 
 ### 部署完成后
+
+部署完成后，系统会自动安装 `jb` 快捷管理工具。你可以直接在终端使用：
 
 ```bash
 # 查看所有节点信息
@@ -92,6 +108,9 @@ jb restart        # 重启所有服务
 # 查看日志
 jb logs xray      # 查看 Xray 日志
 jb logs hy2       # 查看 Hysteria2 日志
+
+# 查看帮助
+jb help           # 显示所有可用命令
 ```
 
 ## 📖 使用指南
