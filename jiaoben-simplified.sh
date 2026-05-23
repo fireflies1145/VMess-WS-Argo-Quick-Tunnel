@@ -24,8 +24,10 @@ NODES_FILE="${WORK_DIR}/nodes.txt"
 SERVICE_FILE="/etc/systemd/system/jiaoben-xray.service"
 
 # --- 权限检查 ---
-[[ $EUID -ne 0 ]] && error "此脚本必须以 root 身份运行"
-mkdir -p "$WORK_DIR" "$XRAY_DIR"
+check_root() {
+    [[ $EUID -ne 0 ]] && error "此脚本必须以 root 身份运行"
+    mkdir -p "$WORK_DIR" "$XRAY_DIR"
+}
 
 # --- 架构识别 ---
 detect_arch() {
@@ -76,6 +78,7 @@ generate_keys() {
 }
 
 deploy() {
+    check_root
     install_deps
     download_xray
     
@@ -118,3 +121,55 @@ deploy() {
   ],
   "outbounds": [{"protocol": "freedom"}]
 }
+EOF
+
+    "$XRAY_BIN" run -test -c "$XRAY_CONFIG" >/dev/null 2>&1 || error "配置验证失败"
+    
+    cat > "$SERVICE_FILE" << EOF
+[Unit]
+Description=Jiaoben Xray
+After=network.target
+[Service]
+ExecStart=$XRAY_BIN run -c $XRAY_CONFIG
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload && systemctl enable --now jiaoben-xray
+
+    # Argo
+    local argo_bin="${WORK_DIR}/cloudflared"
+    local arch=$(detect_arch)
+    info "正在下载 Cloudflared ($arch)..."
+    wget -q "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}" -O "$argo_bin"
+    chmod +x "$argo_bin"
+    
+    info "启动 Argo 隧道..."
+    pkill cloudflared || true
+    nohup "$argo_bin" tunnel --url "http://localhost:445" --no-autoupdate > "$WORK_DIR/argo.log" 2>&1 &
+    
+    local argo_domain=""
+    for i in {1..30}; do
+        argo_domain=$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' "$WORK_DIR/argo.log" | head -1 | sed 's/https:\/\///')
+        [[ -n "$argo_domain" ]] && break
+        sleep 1
+    done
+
+    local ip=$(curl -s ifconfig.me || echo "IP")
+    {
+        echo "========================================="
+        echo "REALITY: vless://$uuid@$ip:443?type=tcp&security=reality&flow=xtls-rprx-vision&pbk=$pub&sid=$sid&sni=$domain#REALITY"
+        echo "Hysteria2: hysteria2://$pass@$ip:444?insecure=1&sni=$domain#Hy2"
+        [[ -n "$argo_domain" ]] && echo "Argo: vless://$uuid@$argo_domain:443?type=ws&path=/$uuid-argo&security=tls&sni=$argo_domain#Argo"
+        echo "========================================="
+    } > "$NODES_FILE"
+    
+    cat "$NODES_FILE"
+    success "部署完成！"
+}
+
+# --- 运行 ---
+echo -e "${CYAN}========================================="
+echo "    jiaoben 一键脚本 v3.1 (修复版)"
+echo -e "=========================================${NC}"
+deploy
