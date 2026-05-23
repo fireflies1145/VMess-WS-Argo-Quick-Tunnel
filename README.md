@@ -1,94 +1,309 @@
-# 🚀 科学上网一键脚本库 (Jiaoben)
+# 🚀 jiaoben - 企业级代理节点一键部署系统
 
-> **🤖 AI 驱动开发声明**：本项目由 **DeepSeek**, **Gemini**, **GPT-5.5-think**, **Claude-sonnet-4.6** 以及 **Manus AI Agent** 共同协作完成。从核心逻辑编写、多架构适配到自动化测试与文档重构，均由顶尖 AI 模型驱动，旨在探索 AI 在网络自动化部署领域的无限可能。
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Shell Script](https://img.shields.io/badge/shell_script-%23121011.svg?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
+[![Maintained](https://img.shields.io/badge/maintained%3F-yes-green.svg)](https://github.com/fireflies1145/jiaoben)
 
-本项目提供了一系列由 AI 辅助编写的科学上网一键部署脚本，旨在为用户提供最简便、高效的节点搭建体验。
+> 一个功能强大、生产就绪的 Shell 脚本项目，用于快速部署和管理多种代理协议节点。支持 Hysteria 2、VLESS、VMess 等多种协议，提供完整的生命周期管理（部署、管理、监控）。
 
----
+## ✨ 核心特性
 
-## 🛠️ 脚本列表
+### 🎯 完整的生命周期管理
+- **一键部署** - `all-in-one.sh` 自动化部署所有依赖和服务
+- **统一管理** - `jb.sh` 提供强大的运维控制台
+- **Systemd 集成** - 所有服务通过 Systemd 统一管理，支持开机自启和故障自动恢复
+- **实时监控** - 查看服务状态、日志和性能指标
 
-### 🌟 四合一全自动部署脚本 (All-in-One)
-**真正的“一键”部署**：复制命令并执行后，脚本将全自动依次部署四个主流协议节点，并**自动安装快捷管理工具 `jb`**。
+### 🔌 多协议支持
+- ✅ **Hysteria 2** - 高性能代理协议
+- ✅ **VLESS** - 灵活的代理协议
+- ✅ **VMess** - 安全的代理协议
+- ✅ **Argo Tunnel** - 快速隧道支持
 
-**自动部署模块：**
-1.  **VLESS + TCP + REALITY**：SNI 偷取 `www.apple.com`，极高隐蔽性。
-2.  **Hysteria 2**：SNI 偷取 `www.bing.com`，适合高丢包环境。
-3.  **VMess + WS + TLS + Argo 隧道**：默认优选域名 `yg1.ygkkk.dpdns.org`。
-4.  **VLESS + WS + TLS + Argo 隧道**：默认优选域名 `yg1.ygkkk.dpdns.org`。
+### 🛡️ 企业级安全
+- 文件权限管理（600 权限保护敏感文件）
+- 完整性校验（SHA256 验证下载文件）
+- Sudo 权限检查和管理
+- 安全的随机数生成
 
-**执行命令：**
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/all-in-one.sh)
+### 📊 系统兼容性
+- ✅ Ubuntu / Debian
+- ✅ CentOS / RHEL
+- ✅ 多架构支持（x86_64、ARM64、ARM32）
+
+## 📋 项目结构
+
+```
+jiaoben/
+├── README.md                          # 项目文档
+├── CHANGELOG.md                       # 版本变更记录
+├── IMPROVEMENTS.md                    # 改进日志
+├── SECURITY.md                        # 安全最佳实践
+│
+├── 核心脚本
+├── all-in-one.sh                      # 一键部署脚本（主控制器）
+├── jb.sh                              # 运维管理脚本（原始版本）
+├── jb_improved.sh                     # 运维管理脚本（改进版本）
+├── common.sh                          # 公共配置和函数库
+│
+├── 协议脚本
+├── hy2.sh                             # Hysteria 2 部署脚本
+├── VLESS-WS-Argo-Quick-Tunnel.sh      # VLESS 快速隧道脚本
+└── VMess-WS-Argo-Quick-Tunnel.sh      # VMess 快速隧道脚本
 ```
 
----
+## 🚀 快速开始
 
-## ⚡ 快捷管理工具 (jb)
+### 前置要求
+- Linux 系统（Ubuntu/Debian/CentOS）
+- Bash 4.0+
+- 网络连接
+- Sudo 权限（推荐配置 NOPASSWD）
 
-部署完成后，你可以直接在终端输入 `jb` 来管理你的节点：
+### 一键部署
 
-- **查看节点**：快速显示所有已部署节点的订阅链接。
-- **状态检查**：实时查看 Xray/Hysteria/Argo 服务的运行状态。
-- **一键停止**：快速关闭所有后台运行的代理服务。
-- **一键卸载**：彻底清理所有工作目录、配置文件及日志。
-
-**手动安装/更新快捷工具：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/jb.sh) install
+# 克隆项目
+git clone https://github.com/fireflies1145/jiaoben.git
+cd jiaoben
+
+# 赋予执行权限
+chmod +x all-in-one.sh
+
+# 执行部署
+./all-in-one.sh
 ```
 
----
+### 部署完成后
 
-### 1. VLESS + WebSocket + TLS + Argo 隧道
-此脚本使用更轻量的 VLESS 协议，通过 Cloudflare Argo 隧道转发流量。
-
-**执行命令：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/VLESS-WS-Argo-Quick-Tunnel.sh)
+# 查看所有节点信息
+jb status
+
+# 查看特定协议节点
+jb show vless
+jb show hysteria2
+
+# 管理服务
+jb start          # 启动所有服务
+jb stop           # 停止所有服务
+jb restart        # 重启所有服务
+
+# 查看日志
+jb logs xray      # 查看 Xray 日志
+jb logs hy2       # 查看 Hysteria2 日志
 ```
 
----
+## 📖 使用指南
 
-### 2. VMess + WebSocket + TLS + Argo 隧道
-此脚本通过 Cloudflare Argo 隧道转发流量，提供稳定的连接体验。
+### 部署流程
 
-**执行命令：**
+1. **系统检测** - 自动识别操作系统和架构
+2. **依赖安装** - 安装必要的系统工具（curl、unzip、jq 等）
+3. **二进制下载** - 下载最新的代理软件（带完整性校验）
+4. **配置生成** - 生成协议配置文件
+5. **服务创建** - 通过 Systemd 创建服务
+6. **启动验证** - 验证所有服务正常运行
+
+### 管理命令
+
+#### jb.sh 命令参考
+
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/VMess-WS-Argo-Quick-Tunnel.sh)
+# 服务管理
+jb start [service]      # 启动服务
+jb stop [service]       # 停止服务
+jb restart [service]    # 重启服务
+jb status [service]     # 查看服务状态
+
+# 信息查看
+jb show [protocol]      # 显示协议节点信息
+jb logs [service]       # 查看服务日志
+jb info                 # 显示完整系统信息
+
+# 改进版本 (jb_improved.sh)
+jb help                 # 显示帮助信息
+jb version              # 显示版本信息
 ```
 
----
+### 配置文件位置
 
-### 3. Hysteria 2 一键部署脚本
-Hysteria 2 是一款基于 QUIC 协议的高性能代理工具，特别适合在高丢包网络环境下使用。
-
-**执行命令：**
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/hy2.sh)
+```
+~/.jiaoben/
+├── all_nodes_info.txt          # 节点信息（JSON 格式）
+├── xray/
+│   ├── config.json             # Xray 配置
+│   └── xray                    # Xray 二进制
+├── hysteria2/
+│   ├── config.yaml             # Hysteria2 配置
+│   └── hysteria                # Hysteria2 二进制
+└── cloudflared/
+    └── cloudflared             # Cloudflare 隧道
 ```
 
+## 🔒 安全建议
+
+### 文件权限
+```bash
+# 确保敏感文件只有所有者可读
+chmod 600 ~/.jiaoben/all_nodes_info.txt
+chmod 600 ~/.jiaoben/xray/config.json
+```
+
+### Sudo 配置
+为了实现无密码部署，建议配置 sudo：
+
+```bash
+# 编辑 sudoers 文件
+sudo visudo
+
+# 添加以下行（用你的用户名替换 username）
+username ALL=(ALL) NOPASSWD: /usr/bin/systemctl, /usr/bin/apt, /usr/bin/yum
+```
+
+### 下载校验
+所有脚本都会自动验证下载的二进制文件的完整性。确保网络连接稳定。
+
+## 📊 架构设计
+
+### 分层架构
+
+```
+┌─────────────────────────────────────┐
+│      运维控制层 (jb.sh)              │
+│  - 服务管理                          │
+│  - 日志查看                          │
+│  - 状态监控                          │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│      部署控制层 (all-in-one.sh)      │
+│  - 系统检测                          │
+│  - 依赖安装                          │
+│  - 配置生成                          │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│      协议模块层                      │
+│  - hy2.sh (Hysteria2)               │
+│  - VLESS-WS-Argo-Quick-Tunnel.sh    │
+│  - VMess-WS-Argo-Quick-Tunnel.sh    │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│      Systemd 服务层                  │
+│  - xray-reality.service             │
+│  - hysteria2.service                │
+│  - argo-tunnel.service              │
+└─────────────────────────────────────┘
+```
+
+### 模块化设计
+
+- **控制器-模块模式** - 主脚本编排，子脚本独立部署
+- **状态与配置分离** - 节点信息与系统配置分开管理
+- **公共库** - `common.sh` 提供统一的工具函数和配置
+
+## 🔄 最近改进 (DeepSeek V4 Pro 深度分析)
+
+### P0 级改进（关键）
+- ✅ 添加文件完整性校验 (SHA256)
+- ✅ 设置敏感文件权限为 600
+- ✅ 改进错误处理机制
+
+### P1 级改进（高优先级）
+- ✅ 创建公共库 `common.sh`
+- ✅ 统一 Sudo 权限管理
+- ✅ 完善架构兼容性检查
+
+### P2 级改进（中优先级）
+- ✅ 动态服务发现
+- ✅ 合并依赖包安装
+- ✅ 增加代码注释
+
+详见 [IMPROVEMENTS.md](IMPROVEMENTS.md) 和 [SECURITY.md](SECURITY.md)
+
+## 📝 文档
+
+- [CHANGELOG.md](CHANGELOG.md) - 版本变更记录
+- [IMPROVEMENTS.md](IMPROVEMENTS.md) - 改进日志和使用指南
+- [SECURITY.md](SECURITY.md) - 安全最佳实践
+
+## 🐛 故障排除
+
+### 部署失败
+
+**问题**: 脚本执行失败  
+**解决方案**:
+```bash
+# 检查 Bash 版本
+bash --version
+
+# 检查网络连接
+ping github.com
+
+# 查看详细错误信息
+bash -x all-in-one.sh
+```
+
+### 服务无法启动
+
+**问题**: Systemd 服务启动失败  
+**解决方案**:
+```bash
+# 查看服务状态
+systemctl status xray-reality
+
+# 查看详细日志
+journalctl -u xray-reality -n 50
+
+# 手动启动调试
+/root/.jiaoben/xray/xray -c /root/.jiaoben/xray/config.json
+```
+
+### 节点链接错误
+
+**问题**: 节点链接显示乱码或错误  
+**解决方案**:
+```bash
+# 检查节点信息文件
+cat ~/.jiaoben/all_nodes_info.txt
+
+# 重新生成节点信息
+jb show all
+```
+
+## 🤝 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+## 📄 许可证
+
+本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
+
+## 👨‍💻 作者
+
+**fireflies1145** - GitHub: [@fireflies1145](https://github.com/fireflies1145)
+
+## 🙏 致谢
+
+感谢以下项目的支持：
+- [Hysteria](https://github.com/apernet/hysteria)
+- [Xray-core](https://github.com/XTLS/Xray-core)
+- [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
+
+## 📞 联系方式
+
+- GitHub Issues: [Report a bug](https://github.com/fireflies1145/jiaoben/issues)
+- 讨论区: [Discussions](https://github.com/fireflies1145/jiaoben/discussions)
+
 ---
 
-## 📋 使用说明
-
-1. **环境要求**：建议在 Debian / Ubuntu 等主流 Linux 发行版上运行。
-2. **权限要求**：部分功能（如防火墙配置、Systemd 服务安装）需要 **root** 权限。
-3. **安全提示**：本项目脚本由 AI 编写，建议在部署前自行检查脚本内容。
-
-## 📂 项目结构
-
-- `all-in-one.sh`: 四合一全自动部署脚本。
-- `jb.sh`: 统一快捷管理工具。
-- `VLESS-WS-Argo-Quick-Tunnel.sh`: VLESS + Argo 隧道一键脚本。
-- `VMess-WS-Argo-Quick-Tunnel.sh`: VMess + Argo 隧道一键脚本。
-- `hy2.sh`: Hysteria 2 一键部署脚本。
-- `README.md`: 项目说明文档。
-
----
-
-## 🤝 贡献与反馈
-
-如果你在使用过程中遇到任何问题，欢迎提交 Issue 或通过 GitHub 提交 Pull Request。
-
-**免责声明**：本工具仅供学习和研究网络技术使用，请在遵守当地法律法规的前提下使用。
+**最后更新**: 2026-05-23  
+**版本**: 2.0.0 (Pro Edition with DeepSeek V4 Optimization)
