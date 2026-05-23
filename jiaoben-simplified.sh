@@ -15,7 +15,6 @@ XRAY_BIN="${XRAY_DIR}/xray"
 XRAY_CONFIG="${WORK_DIR}/config.json"
 SERVICE_FILE="/etc/systemd/system/jiaoben-xray.service"
 
-# 颜色输出
 color_print() {
     case $1 in
         red) echo -e "${RED}$2${NC}" ;;
@@ -27,14 +26,12 @@ color_print() {
     esac
 }
 
-# 检查 root 权限
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         error "此脚本需要 root 权限运行，请使用 sudo 或切换到 root 用户"
     fi
 }
 
-# 检测架构
 detect_arch() {
     local arch
     arch=$(uname -m)
@@ -45,7 +42,6 @@ detect_arch() {
     esac
 }
 
-# 下载文件带重试机制
 download_file() {
     local url="$1"
     local output="$2"
@@ -84,7 +80,6 @@ download_file() {
     return 1
 }
 
-# 下载并安装 Xray
 install_xray() {
     local arch
     arch=$(detect_arch)
@@ -121,82 +116,79 @@ install_xray() {
     success "Xray 安装成功 (v${xray_version})"
 }
 
-# 生成随机字符串
 rand_str() {
     local length=${1:-16}
     tr -dc 'a-zA-Z0-9' </dev/urandom | head -c "$length"
 }
 
-# 生成 UUID
 generate_uuid() {
     cat /proc/sys/kernel/random/uuid
 }
 
-# 生成密钥对 (REALITY) - 修复版本
+# 修复版本：使用临时文件和多种解析方式确保密钥提取
 generate_keys() {
     local private_key=""
     local public_key=""
+    local tmp_file
     
-    # 先尝试标准输出格式
-    local keys
-    keys=$("$XRAY_BIN" x25519 2>/dev/null) || {
+    tmp_file=$(mktemp) || error "无法创建临时文件"
+    
+    "$XRAY_BIN" x25519 > "$tmp_file" 2>&1 || {
+        rm -f "$tmp_file"
         error "密钥生成失败: xray x25519 命令执行错误"
     }
     
-    # 调试输出
-    info "Xray x25519 输出: ${keys}"
+    info "原始输出内容 (已保存至 $tmp_file):"
+    cat "$tmp_file"
     
-    # 尝试多种解析方式
-    if echo "$keys" | grep -q "Private key:"; then
-        private_key=$(echo "$keys" | grep "Private key:" | awk '{print $3}')
-        public_key=$(echo "$keys" | grep "Public key:" | awk '{print $3}')
-    elif echo "$keys" | grep -q "private_key:"; then
-        private_key=$(echo "$keys" | grep "private_key:" | awk '{print $2}')
-        public_key=$(echo "$keys" | grep "public_key:" | awk '{print $2}')
-    elif echo "$keys" | grep -q "PRIVATE KEY:"; then
-        private_key=$(echo "$keys" | grep "PRIVATE KEY:" | awk '{print $3}')
-        public_key=$(echo "$keys" | grep "PUBLIC KEY:" | awk '{print $3}')
+    # 方法1：尝试标准格式 Private key: xxx 和 Public key: xxx
+    private_key=$(grep -oE 'Private key:\s*([A-Za-z0-9+/]{40,50}={0,2})' "$tmp_file" | grep -oE '[A-Za-z0-9+/]{40,50}={0,2}' | head -1)
+    public_key=$(grep -oE 'Public key:\s*([A-Za-z0-9+/]{40,50}={0,2})' "$tmp_file" | grep -oE '[A-Za-z0-9+/]{40,50}={0,2}' | head -1)
+    
+    # 方法2：如果方法1失败，尝试其他格式
+    if [[ -z "$private_key" ]] || [[ -z "$public_key" ]]; then
+        warn "方法1解析失败，尝试方法2..."
+        private_key=$(grep -oE 'private_key:\s*([A-Za-z0-9+/]{40,50}={0,2})' "$tmp_file" | grep -oE '[A-Za-z0-9+/]{40,50}={0,2}' | head -1)
+        public_key=$(grep -oE 'public_key:\s*([A-Za-z0-9+/]{40,50}={0,2})' "$tmp_file" | grep -oE '[A-Za-z0-9+/]{40,50}={0,2}' | head -1)
     fi
     
-    # 如果还是解析失败，尝试提取 base64 编码的密钥
+    # 方法3：提取所有 base64 候选字符串
     if [[ -z "$private_key" ]] || [[ -z "$public_key" ]]; then
-        warn "标准解析失败，尝试直接提取密钥..."
-        # 提取看起来像 base64 编码的字符串（通常密钥长度约为 43 字符）
+        warn "方法2解析失败，尝试方法3 (提取所有base64候选字符串)..."
         local candidates
-        candidates=$(echo "$keys" | grep -oE '[A-Za-z0-9+/]{40,50}={0,2}' | head -2)
+        candidates=$(grep -oE '[A-Za-z0-9+/]{40,50}={0,2}' "$tmp_file" | head -2)
         if [[ -n "$candidates" ]]; then
             private_key=$(echo "$candidates" | head -1)
             public_key=$(echo "$candidates" | tail -1)
         fi
     fi
     
+    rm -f "$tmp_file"
+    
     # 验证密钥
     if [[ -z "$private_key" ]] || [[ -z "$public_key" ]]; then
-        warn "密钥解析失败，输出内容: ${keys}"
-        warn "尝试直接运行 xray x25519 查看输出格式..."
-        "$XRAY_BIN" x25519
-        error "无法解析 Xray 密钥输出格式"
+        error "无法提取密钥，请检查 xray x25519 输出格式"
     fi
     
-    # 验证密钥格式（应该是 base64 编码，长度约 43 字符）
-    if [[ ${#private_key} -lt 40 ]] || [[ ${#public_key} -lt 40 ]]; then
-        warn "密钥长度异常，Private key: ${#private_key} chars, Public key: ${#public_key} chars"
+    # 验证密钥长度（base64 密钥应为 43 字符左右）
+    if [[ ${#private_key} -lt 40 ]]; then
+        warn "私钥长度异常: ${#private_key} 字符, 内容: $private_key"
+    fi
+    if [[ ${#public_key} -lt 40 ]]; then
+        warn "公钥长度异常: ${#public_key} 字符, 内容: $public_key"
     fi
     
     echo "${private_key}:${public_key}"
 }
 
-# 生成 Short ID
 generate_shortid() {
     openssl rand -hex 8
 }
 
-# 生成 Hysteria2 密码
 generate_password() {
     openssl rand -base64 18 | tr -dc 'a-zA-Z0-9'
 }
 
-# 检查端口占用
 check_port() {
     local port=$1
     if ss -tuln | grep -q ":$port "; then
@@ -205,7 +197,6 @@ check_port() {
     return 0
 }
 
-# 获取可用端口
 get_available_port() {
     local base_port=$1
     local port=$base_port
@@ -218,7 +209,6 @@ get_available_port() {
     echo "$port"
 }
 
-# 部署配置
 deploy_config() {
     local domain="$1"
     local port_vless="$2"
@@ -232,27 +222,25 @@ deploy_config() {
     local keys
     keys=$(generate_keys) || error "密钥生成失败"
     
-    # 安全地解析密钥
+    # 安全解析
     local private_key
     local public_key
     
-    # 使用更可靠的方式解析
     IFS=':' read -r private_key public_key <<< "$keys"
     
-    # 验证密钥不为空
     if [[ -z "$private_key" ]] || [[ -z "$public_key" ]]; then
         error "密钥解析结果为空: private_key='${private_key}', public_key='${public_key}'"
     fi
     
-    info "Private Key: ${private_key:0:10}... (已截断)"
-    info "Public Key: ${public_key:0:10}... (已截断)"
+    info "私钥 (前10位): ${private_key:0:10}..."
+    info "公钥 (前10位): ${public_key:0:10}..."
     
     local short_id
     short_id=$(generate_shortid)
     local password
     password=$(generate_password)
     
-    # 使用 printf 或 heredoc with escaping 来避免 shell 展开问题
+    # 使用 heredoc 创建配置文件模板，避免 shell 展开
     cat > "$XRAY_CONFIG" << 'XRAYEOF'
 {
   "log": {
@@ -353,7 +341,7 @@ deploy_config() {
 }
 XRAYEOF
 
-    # 使用 sed 替换占位符，避免 shell 展开问题
+    # 使用 sed 替换占位符
     sed -i "s/PORT_VLESS/${port_vless}/g" "$XRAY_CONFIG"
     sed -i "s/PORT_HY2/${port_hysteria2}/g" "$XRAY_CONFIG"
     sed -i "s/PORT_ARGO/${port_argo}/g" "$XRAY_CONFIG"
@@ -363,25 +351,38 @@ XRAYEOF
     sed -i "s/SHORT_ID_PLACEHOLDER/${short_id}/g" "$XRAY_CONFIG"
     sed -i "s/PASSWORD_PLACEHOLDER/${password}/g" "$XRAY_CONFIG"
     
-    # 验证配置文件中的密钥不为空
-    local config_private_key
-    config_private_key=$(python3 -c "import json; f=open('$XRAY_CONFIG','r'); c=json.load(f); print(c['inbounds'][0]['streamSettings']['realitySettings']['privateKey'])" 2>/dev/null || grep -oP '"privateKey":\s*"[^"]*"' "$XRAY_CONFIG" | head -1)
+    # 强制验证配置文件中的私钥
+    info "验证配置文件中的 privateKey..."
     
-    if [[ -z "$config_private_key" ]] || echo "$config_private_key" | grep -q "PRIVATE_KEY"; then
-        error "配置文件中的 privateKey 仍然为空或未正确替换"
+    local config_private_key
+    config_private_key=$(python3 -c "import json; f=open('$XRAY_CONFIG','r'); c=json.load(f); print(c['inbounds'][0]['streamSettings']['realitySettings']['privateKey'])" 2>/dev/null || true)
+    
+    if [[ -z "$config_private_key" ]]; then
+        # Python 失败时用 grep 检查
+        config_private_key=$(grep -oP '"privateKey":\s*"\K[^"]+' "$XRAY_CONFIG" | head -1)
     fi
+    
+    if [[ -z "$config_private_key" ]] || [[ "$config_private_key" == "PRIVATE_KEY_PLACEHOLDER" ]]; then
+        error "配置文件中的 privateKey 为空！调试信息:\n原始密钥: $private_key\n配置文件内容:\n$(cat "$XRAY_CONFIG")"
+    fi
+    
+    info "配置文件中的私钥 (前10位): ${config_private_key:0:10}..."
     
     # 测试配置文件
     info "测试配置文件..."
     if "$XRAY_BIN" run -test -c "$XRAY_CONFIG" 2>/dev/null; then
         success "配置文件测试通过"
     else
-        warn "配置文件测试失败"
+        warn "配置文件测试失败，详细信息："
         "$XRAY_BIN" run -test -c "$XRAY_CONFIG" 2>&1
         error "请检查配置"
     fi
     
-    # 保存节点信息到文件
+    # 获取公网 IP
+    local public_ip
+    public_ip=$(curl -s ifconfig.me 2>/dev/null) || public_ip=$(hostname -I | awk '{print $1}')
+    
+    # 保存节点信息
     {
         echo "=== 节点配置信息 ==="
         echo "部署时间: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -393,23 +394,21 @@ XRAYEOF
         echo "Public Key: ${public_key}"
         echo "Private Key: ${private_key:0:10}... (已隐藏)"
         echo "Short ID: ${short_id}"
-        echo "VLESS Link: vless://${uuid}@$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}'):${port_vless}?type=tcp&security=reality&flow=xtls-rprx-vision&pbk=${public_key}&sid=${short_id}&sni=${domain}#REALITY-${domain}"
+        echo "VLESS Link: vless://${uuid}@${public_ip}:${port_vless}?type=tcp&security=reality&flow=xtls-rprx-vision&pbk=${public_key}&sid=${short_id}&sni=${domain}#REALITY-${domain}"
         echo ""
         echo "--- Hysteria2 ---"
         echo "Port: ${port_hysteria2}"
         echo "Password: ${password}"
-        echo "Hysteria2 Link: hysteria2://${password}@$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}'):${port_hysteria2}?insecure=1&sni=${domain}#Hysteria2-${domain}"
+        echo "Hysteria2 Link: hysteria2://${password}@${public_ip}:${port_hysteria2}?insecure=1&sni=${domain}#Hysteria2-${domain}"
         echo ""
         echo "--- Argo Tunnel ---"
         echo "Port: ${port_argo}"
         echo "Path: /${uuid}-argo"
     } > "$NODES_FILE"
     
-    # 返回需要用于 Argo 的 UUID
     echo "${uuid}"
 }
 
-# 设置 Systemd 服务
 setup_systemd() {
     cat > "$SERVICE_FILE" << EOF
 [Unit]
@@ -433,7 +432,6 @@ EOF
     systemctl enable jiaoben-xray.service 2>/dev/null || true
 }
 
-# 启动 Argo 隧道并捕获域名
 setup_argo() {
     local port=$1
     local uuid=$2
@@ -442,7 +440,6 @@ setup_argo() {
     
     info "配置 Argo Tunnel..."
     
-    # 下载 cloudflared
     local argo_bin="${WORK_DIR}/cloudflared"
     if [[ ! -f "$argo_bin" ]]; then
         local arch
@@ -456,7 +453,6 @@ setup_argo() {
         chmod +x "$argo_bin"
     fi
     
-    # 终止旧的 Argo 进程
     if [[ -f "$argo_pid_file" ]]; then
         local old_pid
         old_pid=$(cat "$argo_pid_file")
@@ -464,31 +460,26 @@ setup_argo() {
         sleep 1
     fi
     
-    # 启动 cloudflared 隧道
     info "启动 Argo Tunnel (后台运行)..."
     nohup "$argo_bin" tunnel --url "http://localhost:${port}" --no-autoupdate > "$argo_log" 2>&1 &
     local argo_pid=$!
     echo "$argo_pid" > "$argo_pid_file"
     
-    # 等待域名生成 (最多等待 30 秒)
     local argo_domain=""
     local wait_count=0
     info "等待 Argo 分配域名 (最多 30 秒)..."
     while [[ $wait_count -lt 30 ]]; do
-        # 检查进程是否还在运行
         if ! kill -0 "$argo_pid" 2>/dev/null; then
             warn "Argo 进程已退出，检查日志..."
             cat "$argo_log" | tail -10
             return 1
         fi
         
-        # 尝试多种模式匹配域名
         argo_domain=$(grep -oP 'https://[a-zA-Z0-9][-a-zA-Z0-9]*\.trycloudflare\.com' "$argo_log" 2>/dev/null | head -1)
         if [[ -n "$argo_domain" ]]; then
             break
         fi
         
-        # 也尝试匹配其他域名格式
         argo_domain=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$argo_log" 2>/dev/null | head -1)
         if [[ -n "$argo_domain" ]]; then
             break
@@ -498,7 +489,6 @@ setup_argo() {
         wait_count=$((wait_count + 1))
         if [[ $((wait_count % 5)) -eq 0 ]]; then
             info "等待中... (${wait_count}s)"
-            # 显示日志最后一行以便调试
             tail -1 "$argo_log" 2>/dev/null | info
         fi
     done
@@ -513,7 +503,6 @@ setup_argo() {
     
     success "Argo 域名: ${argo_domain}"
     
-    # 更新 nodes.txt 添加 Argo 链接
     cat >> "$NODES_FILE" << EOF
 Argo Domain: ${argo_domain}
 VLESS (Argo): vless://${uuid}@${argo_domain#https://}:443?type=ws&path=/${uuid}-argo&security=tls&sni=${argo_domain#https://}#Argo-${argo_domain#https://}
@@ -522,7 +511,6 @@ EOF
     echo "$argo_domain"
 }
 
-# 显示节点信息
 display_nodes() {
     if [[ ! -f "$NODES_FILE" ]]; then
         error "节点信息文件不存在，请先部署"
@@ -541,20 +529,16 @@ display_nodes() {
     color_print cyan "============================="
 }
 
-# 主部署流程
 main_deploy() {
     check_root
     
-    # 安装依赖
     if ! command -v unzip &>/dev/null; then
         info "安装 unzip..."
         apt-get update -qq && apt-get install -y -qq unzip || yum install -y -q unzip || error "无法安装 unzip"
     fi
     
-    # 安装 Xray
     install_xray
     
-    # 配置参数
     prompt "请输入伪装域名 (留空默认: www.microsoft.com):"
     read -r domain
     domain=${domain:-www.microsoft.com}
@@ -569,14 +553,11 @@ main_deploy() {
     
     info "端口分配: VLESS=${port_vless}, Hysteria2=${port_hysteria2}, Argo=${port_argo}"
     
-    # 生成配置
     local uuid
     uuid=$(deploy_config "$domain" "$port_vless" "$port_hysteria2" "$port_argo")
     
-    # 设置 systemd 服务
     setup_systemd
     
-    # 启动服务
     info "启动 Xray 服务..."
     systemctl restart jiaoben-xray.service
     sleep 2
@@ -586,22 +567,18 @@ main_deploy() {
     else
         warn "Xray 服务启动失败，检查日志..."
         journalctl -u jiaoben-xray.service --no-pager -n 20
-        # 尝试直接运行测试
         info "直接运行 Xray 测试..."
         "$XRAY_BIN" run -test -c "$XRAY_CONFIG" 2>&1
         error "Xray 服务启动失败，请检查配置"
     fi
     
-    # 部署 Argo 隧道
     setup_argo "$port_argo" "$uuid" || warn "Argo 隧道部署不完整，请手动检查"
     
-    # 显示节点
     echo ""
     success "部署完成！节点信息如下："
     display_nodes
 }
 
-# 管理面板
 manage_panel() {
     local choice
     while true; do
@@ -674,7 +651,6 @@ manage_panel() {
     done
 }
 
-# 主菜单
 main() {
     clear
     color_print cyan "========================================"
@@ -696,29 +672,4 @@ main() {
     fi
 }
 
-# 入口点
 main "$@"
-
-
-## 主要修复内容：
-
-1. **修复 `generate_keys` 函数**：
-   - 增加了多种密钥解析格式的兼容性
-   - 添加了调试输出以便排查问题
-   - 增加了密钥验证逻辑
-
-2. **修复配置生成逻辑**：
-   - 使用 heredoc 和占位符替换方式，避免 shell 展开问题
-   - 使用 `sed` 进行变量替换，更安全可靠
-   - 添加配置文件测试步骤
-
-3. **增强错误处理**：
-   - 在部署后立即测试配置文件
-   - 添加了详细的调试输出
-   - 改进了 Argo 域名的捕获逻辑
-
-4. **管理面板增强**：
-   - 增加了"测试配置文件"选项
-   - 改进了日志显示
-
-这个修复版本应该能够正确生成并解析密钥，确保 `privateKey` 不会为空。
