@@ -43,14 +43,10 @@ jiaoben/
 ├── 精简版脚本（推荐）
 ├── jiaoben-simplified.sh              # ⭐ 一键部署脚本（精简版，推荐使用）
 │
-├── 原始版本脚本（兼容性维护）
-├── all-in-one.sh                      # 一键部署脚本（主控制器）
-├── jb.sh                              # 运维管理脚本（原始版本）
+├── 扩展脚本与库
 ├── jb_improved.sh                     # 运维管理脚本（改进版本）
 ├── common.sh                          # 公共配置和函数库
 ├── hy2.sh                             # Hysteria 2 部署脚本
-├── VLESS-WS-Argo-Quick-Tunnel.sh      # VLESS 快速隧道脚本
-├── VMess-WS-Argo-Quick-Tunnel.sh      # VMess 快速隧道脚本
 │
 ├── 卸载脚本
 └── uninstall.sh                       # 卸载脚本
@@ -82,44 +78,17 @@ cd jiaoben
 sudo bash jiaoben-simplified.sh
 ```
 
-### 原始版本（兼容性维护）
 
-**一键部署原始版本：**
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/all-in-one.sh)
-```
-
-**或者使用 wget：**
-
-```bash
-bash <(wget -qO- https://raw.githubusercontent.com/fireflies1145/jiaoben/main/all-in-one.sh)
-```
-
-**本地部署原始版本：**
-
-```bash
-# 克隆项目
-git clone https://github.com/fireflies1145/jiaoben.git
-cd jiaoben
-
-# 赋予执行权限
-chmod +x all-in-one.sh
-
-# 执行部署
-bash all-in-one.sh
-```
 
 ### 版本对比
 
-| 特性 | 精简版 | 原始版 |
-|------|--------|--------|
-| 文件数量 | 1 个 | 6 个 |
-| 代码行数 | ~380 行 | ~800 行 |
-| 功能完整性 | 100% | 100% |
-| 可维护性 | 高 ⭐⭐⭐⭐⭐ | 中 ⭐⭐⭐ |
-| 部署速度 | 快 | 中 |
-| 推荐指数 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
+| 特性 | 描述 |
+|------|--------|
+| 文件数量 | 3 个（核心部署、管理、卸载）|
+| 核心功能 | 100% 覆盖原始版本，并提供更多高级功能 |
+| 可维护性 | 高 ⭐⭐⭐⭐⭐ |
+| 部署速度 | 快 |
+| 推荐指数 | ⭐⭐⭐⭐⭐ |
 
 ## 📖 使用指南
 
@@ -134,34 +103,22 @@ bash all-in-one.sh
 
 ### 管理命令
 
-#### 精简版管理菜单
+#### 改进版管理工具 `jb_improved.sh`
 
-精简版脚本提供交互式菜单：
+`jb_improved.sh` 提供了更强大的命令行管理功能：
 
-```
-=========================================
-  jiaoben - 科学上网四合一精简版
-=========================================
-1. 部署 REALITY
-2. 部署 Hysteria2
-3. 部署 VMess + Argo
-4. 部署 VLESS + Argo
-5. 管理面板
-6. 卸载全部
-0. 退出
+```bash
+jb status              # 显示所有服务状态
+jb start <service>     # 启动指定服务 (例如: jb start hy2)
+jb stop <service>      # 停止指定服务
+jb restart <service>   # 重启指定服务
+jb logs <service>      # 查看指定服务的日志
+jb list                # 列出所有可用服务
+jb nodes               # 显示所有节点信息
+jb help                # 显示帮助信息
 ```
 
-#### 管理面板功能
-
-```
-=== 管理面板 ===
-1. 查看所有节点
-2. 启动所有服务
-3. 停止所有服务
-4. 查看服务状态
-5. 查看日志
-6. 返回主菜单
-```
+可用服务列表：`xray-reality`, `xray-vless`, `hy2`, `argo-tunnel`
 
 ### 配置文件位置
 
@@ -203,18 +160,17 @@ username ALL=(ALL) NOPASSWD: /usr/bin/systemctl, /usr/bin/apt, /usr/bin/yum
 ## 🎯 精简版本特性 (v2.1.0 - 2026-05-23)
 
 ### 核心改进
-- ✅ **代码精简 50%** - 从 800 行减少到 380 行
-- ✅ **单一脚本** - 删除了 5 个冗余脚本文件
-- ✅ **功能完整** - 保留所有核心功能，无功能丢失
-- ✅ **易于维护** - 逻辑清晰，便于扩展
-- ✅ **完整测试** - 经过本地完整测试，无 Bug
+- ✅ **模块化设计** - 将核心部署、高级配置和管理功能分离到不同脚本，提高可维护性。
+- ✅ **功能增强** - `hy2.sh` 提供 ACME 证书、端口跳跃、带宽限速等高级配置；`jb_improved.sh` 提供更灵活的命令行管理。
+- ✅ **精简核心部署** - `jiaoben-simplified.sh` 专注于核心部署流程，保持简洁高效。
+- ✅ **统一公共函数** - `common.sh` 集中管理公共函数和配置，确保一致性。
 
-### 精简方案
-- 合并 VMess 和 VLESS Argo 脚本为一个函数
-- 统一所有公共函数到主脚本中
-- 删除重复的系统检测和依赖安装逻辑
-- 简化配置文件生成流程
-- 优化 Systemd 服务创建
+### 方案概述
+- `jiaoben-simplified.sh`: 核心部署脚本，提供交互式菜单部署 REALITY, Hysteria2, VMess+Argo, VLESS+Argo。
+- `hy2.sh`: 独立 Hysteria2 部署脚本，提供更丰富的配置选项。
+- `jb_improved.sh`: 命令行管理工具，用于管理所有部署的服务。
+- `common.sh`: 公共函数库，供其他脚本调用。
+- `uninstall.sh`: 统一卸载脚本，清理所有服务和文件。
 
 ## 🗑️ 卸载方法
 
