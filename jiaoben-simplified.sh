@@ -127,7 +127,13 @@ EOF
 setup_argo() {
     local port=$1 uuid=$2
     local argo_bin="$WORK_DIR/cloudflared"
-    [[ ! -f "$argo_bin" ]] && download_file "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$(detect_arch)" "$argo_bin" && chmod +x "$argo_bin"
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) error "不支持的架构: $arch" ;;
+    esac
+    [[ ! -f "$argo_bin" ]] && download_file "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$arch" "$argo_bin" && chmod +x "$argo_bin"
     
     info "启动 Argo 隧道..."
     nohup "$argo_bin" tunnel --url "http://localhost:$port" --no-autoupdate > "$WORK_DIR/argo.log" 2>&1 &
