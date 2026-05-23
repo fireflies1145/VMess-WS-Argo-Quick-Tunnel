@@ -37,7 +37,7 @@
 jiaoben/
 ├── README.md                          # 项目文档
 ├── CHANGELOG.md                       # 版本变更记录
-├── IMPROVEMENTS.md                    # 改进日志
+├── docs/IMPROVEMENTS.md                    # 改进日志
 ├── SECURITY.md                        # 安全最佳实践
 │
 ├── 精简版脚本（推荐）
