@@ -211,7 +211,7 @@ EOF
         local argo_domain=""
         info "正在获取 Argo 域名..."
         for i in {1..30}; do
-            argo_domain=$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' "${WORK_DIR}/argo.log" | head -1 | sed 's/https:\/\///')
+            argo_domain=$(grep -aoP 'https://[a-z0-9-]+\.trycloudflare\.com' "${WORK_DIR}/argo.log" | head -1 | sed 's/https:\/\///')
             [[ -n "$argo_domain" ]] && break
             sleep 2
         done
@@ -233,7 +233,7 @@ EOF
 main_menu() {
     clear
     echo -e "${CYAN}========================================="
-    echo "    jiaoben 一键脚本 v3.6 (优选域名版)"
+    echo "    jiaoben 一键脚本 v3.7 (修复版)"
     echo -e "=========================================${NC}"
     echo "1. 部署 REALITY (VLESS)"
     echo "2. 部署 Hysteria2 (独立版)"
