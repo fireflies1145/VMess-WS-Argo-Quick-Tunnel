@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 # ==========================================
-# jiaoben - 科学上网四合一精简版 v3.4
-# 更新日期: 2026-05-23
-# 修复: 集成 hy2.sh 核心功能 (独立二进制)
+# jiaoben - 科学上网四合一精简版 v3.5
+# 更新日期: 2026-05-24
+# 修复: Argo 隧道监听地址与路径匹配问题
 # ==========================================
 
 set -Euo pipefail
@@ -78,7 +78,6 @@ download_hy2() {
     [[ -f "$HY2_BIN" ]] && return
     info "正在下载 Hysteria2..."
     local arch=$(detect_arch)
-    # hysteria-linux-amd64 / hysteria-linux-arm64
     wget -q "https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-${arch}" -O "$HY2_BIN"
     chmod +x "$HY2_BIN"
 }
@@ -106,8 +105,6 @@ deploy_hy2() {
     local port=444
     local pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9')
     local domain="www.bing.com"
-    
-    # 生成自签证书
     openssl req -newkey rsa:2048 -nodes -keyout "${WORK_DIR}/hy2.key" -x509 -days 3650 -out "${WORK_DIR}/hy2.crt" -subj "/CN=www.bing.com" >/dev/null 2>&1
 
     cat > "$HY2_CONFIG" <<EOF
@@ -118,11 +115,6 @@ tls:
 auth:
   type: password
   password: $pass
-quic:
-  initStreamReceiveWindow: 8388608
-  maxStreamReceiveWindow: 8388608
-  initConnReceiveWindow: 20971520
-  maxConnReceiveWindow: 20971520
 log:
   level: warn
 EOF
@@ -138,21 +130,16 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload && systemctl enable --now jiaoben-hy2
-    
     local ip=$(curl -s ifconfig.me || echo "IP")
     local link="hysteria2://$pass@$ip:$port?insecure=1&sni=$domain#Hy2"
     echo "Hysteria2: $link" >> "$NODES_FILE"
-    success "Hysteria2 部署成功"
 }
 
 deploy_core() {
-    local mode=$1 # 1: REALITY, 2: Argo, 3: Hy2, 4: All
+    local mode=$1
     install_deps
-    
-    # 初始化记录文件
     [[ "$mode" -eq 4 ]] || echo "=========================================" > "$NODES_FILE"
 
-    # --- REALITY ---
     if [[ "$mode" -eq 1 ]] || [[ "$mode" -eq 4 ]]; then
         download_xray
         info "正在配置 REALITY..."
@@ -162,7 +149,6 @@ deploy_core() {
         local pub=$(echo "$keys" | cut -d: -f2)
         local sid=$(openssl rand -hex 8)
         local domain="www.microsoft.com"
-        
         cat > "$XRAY_CONFIG" <<EOF
 {
   "log": {"loglevel": "warning"},
@@ -195,19 +181,16 @@ EOF
         echo "REALITY: vless://$uuid@$ip:443?type=tcp&security=reality&flow=xtls-rprx-vision&pbk=$pub&sid=$sid&sni=$domain#REALITY" >> "$NODES_FILE"
     fi
 
-    # --- Hysteria2 ---
     if [[ "$mode" -eq 3 ]] || [[ "$mode" -eq 4 ]]; then
         deploy_hy2
     fi
 
-    # --- Argo ---
     if [[ "$mode" -eq 2 ]] || [[ "$mode" -eq 4 ]]; then
         download_xray
         download_argo
         info "正在配置 Argo 隧道..."
         local uuid=$(cat /proc/sys/kernel/random/uuid)
-        # 如果 Xray 已经在运行，需要动态合并配置（这里简化为覆盖或追加）
-        # 为简单起见，Argo 使用 445 端口
+        local path="/$(openssl rand -hex 4)"
         if [[ ! -f "$XRAY_CONFIG" ]]; then
             cat > "$XRAY_CONFIG" <<EOF
 {
@@ -217,36 +200,40 @@ EOF
 }
 EOF
         fi
-        # 使用 jq 追加 inbound
-        jq '.inbounds += [{"port": 445, "protocol": "vless", "settings": {"clients": [{"id": "'$uuid'"}], "decryption": "none"}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/'$uuid'-argo"}}}]' "$XRAY_CONFIG" > "${XRAY_CONFIG}.tmp" && mv "${XRAY_CONFIG}.tmp" "$XRAY_CONFIG"
+        # 修复：Argo 隧道 Xray 必须监听在 127.0.0.1，且 WebSocket 路径需一致
+        jq '.inbounds += [{"listen": "127.0.0.1", "port": 8080, "protocol": "vless", "settings": {"clients": [{"id": "'$uuid'"}], "decryption": "none"}, "streamSettings": {"network": "ws", "wsSettings": {"path": "'$path'"}}}]' "$XRAY_CONFIG" > "${XRAY_CONFIG}.tmp" && mv "${XRAY_CONFIG}.tmp" "$XRAY_CONFIG"
         systemctl restart jiaoben-xray
         
         pkill cloudflared || true
-        nohup "$ARGO_BIN" tunnel --url "http://localhost:445" --no-autoupdate > "${WORK_DIR}/argo.log" 2>&1 &
+        # 修复：增加 --no-autoupdate 避免权限问题，确保指向正确端口
+        nohup "$ARGO_BIN" tunnel --url "http://127.0.0.1:8080" --no-autoupdate > "${WORK_DIR}/argo.log" 2>&1 &
         
         local argo_domain=""
         info "正在获取 Argo 域名..."
         for i in {1..30}; do
             argo_domain=$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' "${WORK_DIR}/argo.log" | head -1 | sed 's/https:\/\///')
             [[ -n "$argo_domain" ]] && break
-            sleep 1
+            sleep 2
         done
-        [[ -n "$argo_domain" ]] && echo "Argo: vless://$uuid@$argo_domain:443?type=ws&path=/$uuid-argo&security=tls&sni=$argo_domain#Argo" >> "$NODES_FILE"
+        if [[ -n "$argo_domain" ]]; then
+            echo "Argo: vless://$uuid@$argo_domain:443?type=ws&path=$(echo $path | sed 's/\//%2F/g')&security=tls&sni=$argo_domain#Argo" >> "$NODES_FILE"
+            success "Argo 域名获取成功: $argo_domain"
+        else
+            error "Argo 域名获取超时，请检查网络或日志: ${WORK_DIR}/argo.log"
+        fi
     fi
 
     [[ "$mode" -eq 4 ]] || echo "=========================================" >> "$NODES_FILE"
     [[ "$mode" -eq 4 ]] && echo "=========================================" >> "$NODES_FILE"
-    
     clear
     cat "$NODES_FILE"
     success "部署任务完成！"
 }
 
-# --- 菜单系统 ---
 main_menu() {
     clear
     echo -e "${CYAN}========================================="
-    echo "    jiaoben 一键脚本 v3.4 (全功能版)"
+    echo "    jiaoben 一键脚本 v3.5 (修复版)"
     echo -e "=========================================${NC}"
     echo "1. 部署 REALITY (VLESS)"
     echo "2. 部署 Hysteria2 (独立版)"
@@ -262,28 +249,15 @@ main_menu() {
         1) deploy_core 1 ;;
         2) deploy_core 3 ;;
         3) deploy_core 2 ;;
-        4) 
-            echo "=========================================" > "$NODES_FILE"
-            deploy_core 4 
-            ;;
+        4) echo "=========================================" > "$NODES_FILE"; deploy_core 4 ;;
         5) [[ -f "$NODES_FILE" ]] && cat "$NODES_FILE" || warn "未发现节点信息" ;;
-        6) 
-            systemctl restart jiaoben-xray jiaoben-hy2 2>/dev/null || true
-            success "服务已尝试重启"
-            ;;
-        7)
-            systemctl disable --now jiaoben-xray jiaoben-hy2 2>/dev/null || true
-            pkill cloudflared || true
-            rm -rf "$WORK_DIR" /etc/systemd/system/jiaoben-*.service
-            systemctl daemon-reload
-            success "已彻底卸载"
-            ;;
+        6) systemctl restart jiaoben-xray jiaoben-hy2 2>/dev/null || true; success "服务已尝试重启" ;;
+        7) systemctl disable --now jiaoben-xray jiaoben-hy2 2>/dev/null || true; pkill cloudflared || true; rm -rf "$WORK_DIR" /etc/systemd/system/jiaoben-*.service; systemctl daemon-reload; success "已彻底卸载" ;;
         0) exit 0 ;;
         *) main_menu ;;
     esac
 }
 
-# --- 入口 ---
 check_env
 while true; do
     main_menu
