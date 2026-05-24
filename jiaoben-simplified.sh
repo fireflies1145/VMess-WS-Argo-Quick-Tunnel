@@ -216,7 +216,7 @@ EOF
             sleep 2
         done
         if [[ -n "$argo_domain" ]]; then
-            echo "Argo: vless://$uuid@$argo_domain:443?type=ws&path=$(echo $path | sed 's/\//%2F/g')&security=tls&sni=$argo_domain#Argo" >> "$NODES_FILE"
+            echo "Argo: vless://$uuid@yg1.ygkkk.dpdns.org:443?type=ws&path=$(echo $path | sed 's/\//%2F/g')&security=tls&sni=$argo_domain#Argo" >> "$NODES_FILE"
             success "Argo 域名获取成功: $argo_domain"
         else
             error "Argo 域名获取超时，请检查网络或日志: ${WORK_DIR}/argo.log"
@@ -233,7 +233,7 @@ EOF
 main_menu() {
     clear
     echo -e "${CYAN}========================================="
-    echo "    jiaoben 一键脚本 v3.5 (修复版)"
+    echo "    jiaoben 一键脚本 v3.6 (优选域名版)"
     echo -e "=========================================${NC}"
     echo "1. 部署 REALITY (VLESS)"
     echo "2. 部署 Hysteria2 (独立版)"
