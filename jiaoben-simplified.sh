@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 
 # ==========================================
-# jiaoben - 科学上网四合一精简版 v4.0
+# jiaoben - 科学上网四合一精简版 v4.1
 # 更新日期: 2026-05-29
-# 优化: 安全校验、Argo systemd、代码清理
+# 优化: Bug修复、端口检测、卸载确认、代码清理
 # ==========================================
 
 set -Euo pipefail
+
+VERSION="4.1"
 
 # --- 颜色与日志 ---
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -24,6 +26,12 @@ ARGO_BIN="${WORK_DIR}/cloudflared"
 XRAY_CONFIG="${WORK_DIR}/config.json"
 HY2_CONFIG="${WORK_DIR}/hy2_config.yaml"
 NODES_FILE="${WORK_DIR}/nodes.txt"
+
+# --- 参数支持 ---
+if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then
+    echo "jiaoben v${VERSION}"
+    exit 0
+fi
 
 # --- 权限与目录检查 ---
 check_env() {
@@ -53,6 +61,18 @@ detect_xray_arch() {
     esac
 }
 
+# --- 端口占用检测 ---
+check_port() {
+    local port="$1"
+    if ss -tlnp 2>/dev/null | grep -q ":${port} " || \
+       netstat -tlnp 2>/dev/null | grep -q ":${port} "; then
+        warn "端口 $port 已被占用:"
+        ss -tlnp 2>/dev/null | grep ":${port} " || netstat -tlnp 2>/dev/null | grep ":${port} "
+        return 1
+    fi
+    return 0
+}
+
 # --- SHA256 校验 ---
 verify_sha256() {
     local file="$1"
@@ -64,6 +84,25 @@ verify_sha256() {
         error "SHA256 校验失败: 期望 $expected, 实际 $actual"
     fi
     info "SHA256 校验通过 ✓"
+}
+
+# --- 下载辅助（带重试和校验） ---
+download_file() {
+    local url="$1"
+    local dest="$2"
+    local desc="$3"
+    local retries=3
+
+    for i in $(seq 1 $retries); do
+        info "下载 $desc (尝试 $i/$retries)..."
+        if wget -q --timeout=30 "$url" -O "$dest" 2>/dev/null; then
+            [[ -s "$dest" ]] && return 0
+        fi
+        rm -f "$dest"
+        warn "下载失败，${i}s 后重试..."
+        sleep "$i"
+    done
+    error "下载 $desc 失败，请检查网络连接"
 }
 
 # --- 组件下载 ---
@@ -78,22 +117,23 @@ install_deps() {
 
 download_xray() {
     [[ -f "$XRAY_BIN" ]] && return
-    info "正在下载 Xray..."
     local arch=$(detect_xray_arch)
     local version=$(curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | jq -r .tag_name)
-    local zip_url="https://github.com/XTLS/Xray-core/releases/download/${version}/Xray-linux-${arch}.zip"
+    [[ -z "$version" || "$version" == "null" ]] && error "无法获取 Xray 版本号"
 
-    wget -q "$zip_url" -O "$WORK_DIR/xray.zip"
-    # SHA256 校验（从 release metadata 获取）
-    local sha=$(curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | \
-        jq -r ".assets[] | select(.name==\"Xray-linux-${arch}.zip\") | .name" 2>/dev/null)
-    if [[ -n "$sha" ]]; then
-        wget -q "https://github.com/XTLS/Xray-core/releases/download/${version}/Xray-linux-${arch}.zip.dgst" \
-            -O "$WORK_DIR/xray.zip.dgst" 2>/dev/null || true
-        local expected=$(grep -oP 'SHA256=\K[a-f0-9]{64}' "$WORK_DIR/xray.zip.dgst" 2>/dev/null || echo "")
-        [[ -n "$expected" ]] && verify_sha256 "$WORK_DIR/xray.zip" "$expected"
-        rm -f "$WORK_DIR/xray.zip.dgst"
+    local zip_url="https://github.com/XTLS/Xray-core/releases/download/${version}/Xray-linux-${arch}.zip"
+    download_file "$zip_url" "$WORK_DIR/xray.zip" "Xray ${version}"
+
+    # SHA256 校验（从 .dgst 文件获取）
+    wget -q "https://github.com/XTLS/Xray-core/releases/download/${version}/Xray-linux-${arch}.zip.dgst" \
+        -O "$WORK_DIR/xray.zip.dgst" 2>/dev/null || true
+    local expected=$(grep -oP 'SHA256=\K[a-f0-9]{64}' "$WORK_DIR/xray.zip.dgst" 2>/dev/null || echo "")
+    if [[ -n "$expected" ]]; then
+        verify_sha256 "$WORK_DIR/xray.zip" "$expected"
+    else
+        warn "未找到 SHA256 校验值，跳过校验"
     fi
+    rm -f "$WORK_DIR/xray.zip.dgst"
 
     unzip -qo "$WORK_DIR/xray.zip" -d "$XRAY_DIR"
     chmod +x "$XRAY_BIN"
@@ -103,28 +143,36 @@ download_xray() {
 
 download_hy2() {
     [[ -f "$HY2_BIN" ]] && return
-    info "正在下载 Hysteria2..."
     local arch=$(detect_arch)
     local bin_url="https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-${arch}"
-    wget -q "$bin_url" -O "$HY2_BIN"
+    download_file "$bin_url" "$HY2_BIN" "Hysteria2"
+
     # SHA256 校验
     local sha_url="${bin_url}.sha256"
     local expected=$(curl -fsSL "$sha_url" 2>/dev/null | cut -d' ' -f1 || echo "")
-    [[ -n "$expected" ]] && verify_sha256 "$HY2_BIN" "$expected"
+    if [[ -n "$expected" ]]; then
+        verify_sha256 "$HY2_BIN" "$expected"
+    else
+        warn "未找到 SHA256 校验值，跳过校验"
+    fi
     chmod +x "$HY2_BIN"
     info "Hysteria2 下载完成"
 }
 
 download_argo() {
     [[ -f "$ARGO_BIN" ]] && return
-    info "正在下载 Cloudflared..."
     local arch=$(detect_arch)
     local bin_url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}"
-    wget -q "$bin_url" -O "$ARGO_BIN"
+    download_file "$bin_url" "$ARGO_BIN" "Cloudflared"
+
     # SHA256 校验
     local sha_url="${bin_url}.sha256"
     local expected=$(curl -fsSL "$sha_url" 2>/dev/null | cut -d' ' -f1 || echo "")
-    [[ -n "$expected" ]] && verify_sha256 "$ARGO_BIN" "$expected"
+    if [[ -n "$expected" ]]; then
+        verify_sha256 "$ARGO_BIN" "$expected"
+    else
+        warn "未找到 SHA256 校验值，跳过校验"
+    fi
     chmod +x "$ARGO_BIN"
     info "Cloudflared 下载完成"
 }
@@ -137,11 +185,12 @@ generate_keys() {
     priv=$(echo "$output" | grep -oP 'Private key:\s*\K\S+')
     pub=$(echo "$output" | grep -oP 'Public key:\s*\K\S+')
     if [[ -z "$priv" || -z "$pub" ]]; then
-        # fallback: 旧版解析
+        # fallback: 旧版 xray 输出格式
         local keys=$(echo "$output" | grep -oE '[A-Za-z0-9+/_-]{43,44}')
         priv=$(echo "$keys" | head -1)
         pub=$(echo "$keys" | head -2 | tail -1)
     fi
+    [[ -z "$priv" || -z "$pub" ]] && error "生成密钥失败，请检查 Xray 二进制"
     echo "${priv}:${pub}"
 }
 
@@ -149,6 +198,7 @@ deploy_hy2() {
     download_hy2
     info "正在配置 Hysteria2..."
     local port=444
+    check_port "$port" || warn "端口 $port 冲突，Hysteria2 可能启动失败"
     local pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9')
     local domain="www.bing.com"
     openssl req -newkey rsa:2048 -nodes -keyout "${WORK_DIR}/hy2.key" -x509 -days 3650 -out "${WORK_DIR}/hy2.crt" -subj "/CN=www.bing.com" >/dev/null 2>&1
@@ -185,7 +235,6 @@ EOF
 
 # --- Argo systemd 服务 ---
 create_argo_service() {
-    local argo_domain="$1"
     cat > "/etc/systemd/system/jiaoben-argo.service" <<EOF
 [Unit]
 Description=Jiaoben Cloudflare Argo Tunnel
@@ -215,6 +264,11 @@ get_argo_domain() {
     return 1
 }
 
+# --- 备份现有配置 ---
+backup_config() {
+    [[ -f "$XRAY_CONFIG" ]] && cp "$XRAY_CONFIG" "${XRAY_CONFIG}.bak.$(date +%s)"
+}
+
 deploy_core() {
     local mode=$1
     install_deps
@@ -222,6 +276,7 @@ deploy_core() {
 
     if [[ "$mode" -eq 1 ]] || [[ "$mode" -eq 4 ]]; then
         download_xray
+        check_port 443 || warn "端口 443 冲突，REALITY 可能启动失败"
         info "正在配置 REALITY..."
         local uuid=$(cat /proc/sys/kernel/random/uuid)
         local keys=$(generate_keys)
@@ -229,6 +284,8 @@ deploy_core() {
         local pub=$(echo "$keys" | cut -d: -f2)
         local sid=$(openssl rand -hex 8)
         local domain="www.microsoft.com"
+
+        backup_config
         cat > "$XRAY_CONFIG" <<EOF
 {
   "log": {"loglevel": "warning"},
@@ -273,6 +330,8 @@ EOF
         info "正在配置 Argo 隧道..."
         local uuid=$(cat /proc/sys/kernel/random/uuid)
         local path="/$(openssl rand -hex 4)"
+
+        backup_config
         if [[ ! -f "$XRAY_CONFIG" ]]; then
             cat > "$XRAY_CONFIG" <<EOF
 {
@@ -282,9 +341,13 @@ EOF
 }
 EOF
         fi
-        jq --arg uuid "$uuid" --arg path "$path" \
+
+        if ! jq --arg uuid "$uuid" --arg path "$path" \
             '.inbounds += [{"listen": "127.0.0.1", "port": 8080, "protocol": "vless", "settings": {"clients": [{"id": $uuid}], "decryption": "none"}, "streamSettings": {"network": "ws", "wsSettings": {"path": $path}}}]' \
-            "$XRAY_CONFIG" > "${XRAY_CONFIG}.tmp" && mv "${XRAY_CONFIG}.tmp" "$XRAY_CONFIG"
+            "$XRAY_CONFIG" > "${XRAY_CONFIG}.tmp"; then
+            error "Xray 配置更新失败（jq 错误），已保留原配置"
+        fi
+        mv "${XRAY_CONFIG}.tmp" "$XRAY_CONFIG"
         systemctl restart jiaoben-xray
 
         # 停止旧进程，使用 systemd 管理
@@ -296,7 +359,7 @@ EOF
         if argo_domain=$(get_argo_domain); then
             success "Argo 域名获取成功: $argo_domain"
         else
-            warn "Argo 域名获取超时，使用优选域名作为备用"
+            warn "Argo 域名获取超时，使用优选域名: yg1.ygkkk.dpdns.org"
             argo_domain="yg1.ygkkk.dpdns.org"
         fi
         local encoded_path=$(printf '%s' "$path" | sed 's|/|%2F|g')
@@ -305,8 +368,9 @@ EOF
 
     [[ "$mode" -eq 4 ]] || echo "=========================================" >> "$NODES_FILE"
     [[ "$mode" -eq 4 ]] && echo "=========================================" >> "$NODES_FILE"
-    clear
+    echo ""
     cat "$NODES_FILE"
+    echo ""
     success "部署任务完成！"
 }
 
@@ -328,6 +392,11 @@ restart_services() {
 }
 
 uninstall_all() {
+    echo ""
+    warn "⚠️  即将删除所有 jiaoben 组件和配置！"
+    read -p "确认卸载？(y/N): " confirm
+    [[ "$confirm" != "y" && "$confirm" != "Y" ]] && { info "已取消"; return; }
+
     info "正在卸载所有组件..."
     for svc in xray hy2 argo; do
         if service_exists "$svc"; then
@@ -345,11 +414,11 @@ uninstall_all() {
 main_menu() {
     clear
     echo -e "${CYAN}========================================="
-    echo "    jiaoben 一键脚本 v4.0"
+    echo "    jiaoben 一键脚本 v${VERSION}"
     echo -e "=========================================${NC}"
     echo "1. 部署 REALITY (VLESS)"
-    echo "2. 部署 Hysteria2 (独立版)"
-    echo "3. 部署 Argo 隧道 (VLESS)"
+    echo "2. 部署 Argo 隧道 (VLESS)"
+    echo "3. 部署 Hysteria2"
     echo "4. 一键部署全部 (以上所有)"
     echo "5. 查看节点信息"
     echo "6. 停止/重启服务"
@@ -359,8 +428,8 @@ main_menu() {
     read -p "请选择 [0-7]: " choice
     case $choice in
         1) deploy_core 1 ;;
-        2) deploy_core 3 ;;
-        3) deploy_core 2 ;;
+        2) deploy_core 2 ;;
+        3) deploy_core 3 ;;
         4) echo "=========================================" > "$NODES_FILE"; deploy_core 4 ;;
         5) [[ -f "$NODES_FILE" ]] && cat "$NODES_FILE" || warn "未发现节点信息" ;;
         6) restart_services ;;
