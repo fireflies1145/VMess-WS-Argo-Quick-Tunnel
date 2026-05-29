@@ -73,6 +73,28 @@ check_port() {
     return 0
 }
 
+# --- 节点信息输出 ---
+append_node() {
+    local name="$1"
+    local link="$2"
+    echo "" >> "$NODES_FILE"
+    echo "┌─────────────────────────────────────────────" >> "$NODES_FILE"
+    echo "│  $name" >> "$NODES_FILE"
+    echo "├─────────────────────────────────────────────" >> "$NODES_FILE"
+    echo "$link" >> "$NODES_FILE"
+    echo "└─────────────────────────────────────────────" >> "$NODES_FILE"
+}
+
+print_nodes() {
+    [[ ! -f "$NODES_FILE" ]] && { warn "未发现节点信息"; return; }
+    echo ""
+    echo -e "${CYAN}╔═══════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║           📋 节点部署信息                      ║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════╝${NC}"
+    cat "$NODES_FILE"
+    echo ""
+}
+
 # --- SHA256 校验 ---
 verify_sha256() {
     local file="$1"
@@ -229,7 +251,7 @@ EOF
     systemctl daemon-reload && systemctl enable --now jiaoben-hy2
     local ip=$(curl -s ifconfig.me || echo "IP")
     local link="hysteria2://$pass@$ip:$port?insecure=1&sni=$domain#Hy2"
-    echo "Hysteria2: $link" >> "$NODES_FILE"
+    append_node "Hysteria2" "$link"
     success "Hysteria2 部署完成"
 }
 
@@ -272,7 +294,7 @@ backup_config() {
 deploy_core() {
     local mode=$1
     install_deps
-    [[ "$mode" -eq 4 ]] || echo "=========================================" > "$NODES_FILE"
+    [[ "$mode" -eq 4 ]] || : > "$NODES_FILE"
 
     if [[ "$mode" -eq 1 ]] || [[ "$mode" -eq 4 ]]; then
         download_xray
@@ -316,7 +338,8 @@ WantedBy=multi-user.target
 EOF
         systemctl daemon-reload && systemctl enable --now jiaoben-xray
         local ip=$(curl -s ifconfig.me || echo "IP")
-        echo "REALITY: vless://$uuid@$ip:443?type=tcp&security=reality&flow=xtls-rprx-vision&pbk=$pub&sid=$sid&sni=$domain#REALITY" >> "$NODES_FILE"
+        local real_link="vless://$uuid@$ip:443?type=tcp&security=reality&pbk=$pub&fp=chrome&sni=$domain&flow=xtls-rprx-vision&sid=$sid#REALITY"
+        append_node "REALITY (VLESS)" "$real_link"
         success "REALITY 部署完成"
     fi
 
@@ -363,14 +386,12 @@ EOF
             argo_domain="yg1.ygkkk.dpdns.org"
         fi
         local encoded_path=$(printf '%s' "$path" | sed 's|/|%2F|g')
-        echo "Argo: vless://$uuid@${argo_domain}:443?type=ws&path=${encoded_path}&security=tls&sni=${argo_domain}#Argo" >> "$NODES_FILE"
+        local argo_link="vless://$uuid@${argo_domain}:443?encryption=none&type=ws&path=${encoded_path}&security=tls&sni=${argo_domain}&fp=chrome#Argo"
+        append_node "Argo 隧道 (VLESS)" "$argo_link"
     fi
 
-    [[ "$mode" -eq 4 ]] || echo "=========================================" >> "$NODES_FILE"
-    [[ "$mode" -eq 4 ]] && echo "=========================================" >> "$NODES_FILE"
-    echo ""
-    cat "$NODES_FILE"
-    echo ""
+    clear
+    print_nodes
     success "部署任务完成！"
 }
 
@@ -430,8 +451,8 @@ main_menu() {
         1) deploy_core 1 ;;
         2) deploy_core 2 ;;
         3) deploy_core 3 ;;
-        4) echo "=========================================" > "$NODES_FILE"; deploy_core 4 ;;
-        5) [[ -f "$NODES_FILE" ]] && cat "$NODES_FILE" || warn "未发现节点信息" ;;
+        4) : > "$NODES_FILE"; deploy_core 4 ;;
+        5) print_nodes ;;
         6) restart_services ;;
         7) uninstall_all ;;
         0) exit 0 ;;
