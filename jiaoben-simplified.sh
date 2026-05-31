@@ -8,24 +8,30 @@
 
 set -Euo pipefail
 
-VERSION="4.1"
+VERSION="5.0"
 
-# --- 颜色与日志 ---
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
-info() { echo -e "${BLUE}[INFO]${NC} $*"; }
-success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+# --- 加载公共配置 ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+# 设置错误陷阱
+set_error_trap
+
+# --- 使用 common.sh 中的日志函数 ---
+info() { log_info "$*"; }
+success() { log_info "$*"; }
+warn() { log_warn "$*"; }
+error() { log_error "$*"; exit 1; }
 
 # --- 路径 ---
-WORK_DIR="/root/.jiaoben"
+WORK_DIR="${WORKDIR_BASE}"
 XRAY_DIR="${WORK_DIR}/xray"
 XRAY_BIN="${XRAY_DIR}/xray"
 HY2_BIN="${WORK_DIR}/hysteria"
 ARGO_BIN="${WORK_DIR}/cloudflared"
 XRAY_CONFIG="${WORK_DIR}/config.json"
 HY2_CONFIG="${WORK_DIR}/hy2_config.yaml"
-NODES_FILE="${WORK_DIR}/nodes.txt"
+NODES_FILE="${INFO_FILE}"
 
 # --- 参数支持 ---
 if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then

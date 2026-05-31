@@ -29,15 +29,14 @@ show_help() {
   help                显示此帮助信息
 
 服务列表:
-  xray-reality        XRay Reality 服务
-  xray-vless          XRay VLESS 服务
+  xray                Xray 服务
   hy2                 Hysteria 2 服务
-  argo-tunnel         Cloudflare Argo 隧道
+  argo                Cloudflare Argo 隧道
 
 示例:
   jb status                    # 查看所有服务状态
   jb start hy2                 # 启动 Hysteria 2 服务
-  jb logs xray-reality         # 查看 XRay Reality 日志
+  jb logs xray                 # 查看 Xray 日志
   jb nodes                     # 显示所有节点链接
 
 选项:
@@ -56,7 +55,7 @@ show_version() {
 # 参数验证
 validate_service() {
     local service="$1"
-    local valid_services=("xray-reality" "xray-vless" "hy2" "argo-tunnel")
+    local valid_services=("xray" "hy2" "argo")
     
     for valid in "${valid_services[@]}"; do
         if [ "$service" = "$valid" ]; then
@@ -133,10 +132,9 @@ show_logs() {
 # 列出所有服务
 list_services() {
     log_info "=== 可用的服务 ==="
-    echo "  • xray-reality    - XRay Reality 协议服务"
-    echo "  • xray-vless      - XRay VLESS 协议服务"
+    echo "  • xray            - Xray 协议服务"
     echo "  • hy2             - Hysteria 2 协议服务"
-    echo "  • argo-tunnel     - Cloudflare Argo 隧道"
+    echo "  • argo            - Cloudflare Argo 隧道"
 }
 
 # 显示节点信息
