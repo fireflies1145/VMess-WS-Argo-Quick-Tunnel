@@ -20,14 +20,11 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; }
 success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
 
 # --- 配置 ---
-WORK_BASE="${HOME}/proxy-nodes"
+WORK_BASE="/root/.jiaoben"
 SERVICES=(
-    "xray-reality"
-    "hy2"
-    "xray-vmess-argo"
-    "cf-vmess-argo"
-    "xray-vless-argo"
-    "cf-vless-argo"
+    "jiaoben-xray"
+    "jiaoben-hy2"
+    "jiaoben-argo"
 )
 
 # --- 卸载函数 ---
