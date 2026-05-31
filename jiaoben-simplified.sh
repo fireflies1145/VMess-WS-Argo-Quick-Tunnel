@@ -225,24 +225,227 @@ generate_keys() {
 deploy_hy2() {
     download_hy2
     info "正在配置 Hysteria2..."
-    local port=444
-    check_port "$port" || warn "端口 $port 冲突，Hysteria2 可能启动失败"
-    local pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9')
-    local domain="www.bing.com"
-    openssl req -newkey rsa:2048 -nodes -keyout "${WORK_DIR}/hy2.key" -x509 -days 3650 -out "${WORK_DIR}/hy2.crt" -subj "/CN=www.bing.com" >/dev/null 2>&1
-
+    
+    # --- 端口配置 ---
+    local port=""
+    while true; do
+        read -p "监听端口（回车随机分配 10000-59999）: " port
+        if [ -z "$port" ]; then
+            # 随机端口
+            port=$(od -An -N2 -tu2 /dev/urandom | tr -d '[:space:]')
+            port=$(( port % 50000 + 10000 ))
+            port=$(( port > 59999 ? 59999 : port ))
+            info "随机端口: $port"
+            break
+        fi
+        if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+            warn "无效端口，请输入 1-65535 之间的数字"
+            continue
+        fi
+        if ss -ulnp 2>/dev/null | grep -q ":${port} "; then
+            warn "端口 $port 已被占用（UDP），请更换"
+            continue
+        fi
+        info "使用端口: $port"
+        break
+    done
+    
+    # --- 端口跳跃 ---
+    local port_hop_enabled="no"
+    local port_hop_range=""
+    local port_hop_interval="25s"
+    local listen_addr=":${port}"
+    local firewall_port_range="$port"
+    
+    read -p "是否开启端口跳跃 [y/N]: " hop_choice
+    [[ "${hop_choice,,}" =~ ^y(es)?$ ]] && port_hop_enabled="yes"
+    
+    if [ "$port_hop_enabled" = "yes" ]; then
+        local default_port_end=$((port + 75))
+        [ "$default_port_end" -gt 65535 ] && default_port_end=65535
+        
+        local port_end=""
+        while true; do
+            read -p "跳跃范围结束端口（起始 ${port}，默认 ${default_port_end}）: " port_end
+            port_end="${port_end:-$default_port_end}"
+            if [[ "$port_end" =~ ^[0-9]+$ ]] && [ "$port_end" -gt "$port" ] && [ "$port_end" -le 65535 ]; then
+                break
+            fi
+            warn "结束端口须大于 ${port} 且不超过 65535"
+        done
+        
+        read -p "端口跳跃间隔（默认 25s）: " hop_interval
+        port_hop_interval="${hop_interval:-25s}"
+        port_hop_range="${port}-${port_end}"
+        listen_addr=":${port_hop_range}"
+        firewall_port_range="${port}-${port_end}"
+        info "端口跳跃: ${port_hop_range}  间隔: ${port_hop_interval}"
+    fi
+    
+    # --- TLS 证书 ---
+    local cert_method=""
+    local cert_file=""
+    local key_file=""
+    local sni=""
+    local insecure=""
+    local acme_domain=""
+    local acme_email=""
+    
+    echo ""
+    echo "TLS 证书方式:"
+    echo "  1) 自签证书（SNI 伪装为 www.bing.com，客户端需跳过验证）"
+    echo "  2) ACME 自动申请（域名需已解析到本机，不支持 CDN 代理）"
+    echo "  3) 自定义证书文件"
+    echo ""
+    
+    while true; do
+        read -p "请选择 [1-3]（默认 1）: " cert_choice
+        cert_choice="${cert_choice:-1}"
+        case "$cert_choice" in
+            1)
+                cert_method="self"
+                sni="www.bing.com"
+                insecure="1"
+                if [ ! -f "${WORK_DIR}/hy2.crt" ] || [ ! -f "${WORK_DIR}/hy2.key" ]; then
+                    info "正在生成自签证书 (CN: ${sni})..."
+                    openssl req -newkey rsa:2048 -nodes -keyout "${WORK_DIR}/hy2.key" \
+                        -x509 -days 3650 -out "${WORK_DIR}/hy2.crt" \
+                        -subj "/CN=${sni}" 2>/dev/null || error "自签证书生成失败"
+                    chmod 600 "${WORK_DIR}/hy2.key" "${WORK_DIR}/hy2.crt"
+                    info "自签证书已生成"
+                else
+                    info "复用已有自签证书"
+                fi
+                cert_file="${WORK_DIR}/hy2.crt"
+                key_file="${WORK_DIR}/hy2.key"
+                break
+                ;;
+            2)
+                cert_method="acme"
+                warn "⚠ 注意：CDN 代理（如 Cloudflare 橙色云朵）会导致 ACME 验证失败！"
+                
+                while true; do
+                    read -p "域名（需已解析到本机）: " acme_domain
+                    [[ "$acme_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]+)?(\.[a-zA-Z]{2,})$ ]] && break
+                    warn "域名格式不正确"
+                done
+                while true; do
+                    read -p "邮箱（Let's Encrypt 通知用）: " acme_email
+                    [[ "$acme_email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] && break
+                    warn "邮箱格式不正确"
+                done
+                
+                info "证书申请可能需要 1-2 分钟，启动后请耐心等待。"
+                sni="$acme_domain"
+                insecure=""
+                break
+                ;;
+            3)
+                cert_method="custom"
+                while true; do
+                    read -p "证书文件路径（fullchain.pem / .crt）: " cert_file
+                    [ -n "$cert_file" ] && [ -f "$cert_file" ] && break
+                    warn "文件不存在，请重新输入"
+                done
+                while true; do
+                    read -p "私钥文件路径（privkey.pem / .key）: " key_file
+                    [ -n "$key_file" ] && [ -f "$key_file" ] && break
+                    warn "文件不存在，请重新输入"
+                done
+                sni=$(openssl x509 -in "$cert_file" -noout -subject 2>/dev/null | sed 's/.*CN\s*=\s*//' | head -n1) || sni=""
+                [ -n "$sni" ] && info "证书 CN: $sni"
+                insecure=""
+                break
+                ;;
+            *)
+                warn "请输入 1、2 或 3"
+                ;;
+        esac
+    done
+    
+    # --- 带宽限速 ---
+    local limit_speed="no"
+    local speed_up=""
+    local speed_down=""
+    
+    echo ""
+    echo "带宽限速:"
+    echo "  1) 限速 100 Mbps（上下行）"
+    echo "  2) 不限速"
+    echo ""
+    
+    while true; do
+        read -p "请选择 [1-2]（默认 2）: " speed_choice
+        speed_choice="${speed_choice:-2}"
+        case "$speed_choice" in
+            1) limit_speed="yes"; speed_up="100"; speed_down="100"; info "限速: 100 Mbps"; break ;;
+            2) limit_speed="no"; info "不限速"; break ;;
+            *) warn "请输入 1 或 2" ;;
+        esac
+    done
+    
+    # --- 生成密码 ---
+    local pass=$(openssl rand -hex 16)
+    info "认证密码: ${pass}"
+    
+    # --- 构建配置 ---
+    local tls_block=""
+    case "$cert_method" in
+        self|custom)
+            tls_block="tls:\n  cert: ${cert_file}\n  key: ${key_file}"
+            ;;
+        acme)
+            tls_block="tls:\n  acme:\n    domains:\n      - ${acme_domain}\n    email: ${acme_email}"
+            ;;
+    esac
+    
+    local bandwidth_block=""
+    if [ "$limit_speed" = "yes" ]; then
+        bandwidth_block="bandwidth:\n  up: ${speed_up} mbps\n  down: ${speed_down} mbps"
+    fi
+    
     cat > "$HY2_CONFIG" <<EOF
-listen: :$port
+listen: ${listen_addr}
+
 tls:
-  cert: ${WORK_DIR}/hy2.crt
-  key: ${WORK_DIR}/hy2.key
+  cert: ${cert_file}
+  key: ${key_file}
+
 auth:
   type: password
-  password: $pass
+  password: ${pass}
+
+${bandwidth_block:+$bandwidth_block
+}
+quic:
+  initStreamReceiveWindow: 8388608
+  maxStreamReceiveWindow: 8388608
+  initConnReceiveWindow: 20971520
+  maxConnReceiveWindow: 20971520
+  maxIdleTimeout: 30s
+  keepAliveInterval: 10s
+
 log:
   level: warn
 EOF
-
+    
+    chmod 600 "$HY2_CONFIG"
+    info "配置文件已写入: $HY2_CONFIG"
+    
+    # --- 防火墙 ---
+    if [ "$port_hop_enabled" = "yes" ]; then
+        local colon_range="${firewall_port_range//-/:}"
+        if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
+            ufw allow proto udp from any to any port "$colon_range" 2>/dev/null || true
+            info "UFW 规则已添加: ${colon_range}/udp"
+        elif command -v iptables >/dev/null 2>&1; then
+            iptables -C INPUT -p udp --dport "$colon_range" -j ACCEPT 2>/dev/null || \
+            iptables -A INPUT -p udp --dport "$colon_range" -j ACCEPT 2>/dev/null || true
+            info "iptables 规则已添加: ${colon_range}/udp"
+        fi
+    fi
+    
+    # --- 启动服务 ---
     cat > "/etc/systemd/system/jiaoben-hy2.service" <<EOF
 [Unit]
 Description=Jiaoben Hysteria2
@@ -251,13 +454,45 @@ After=network.target
 ExecStart=$HY2_BIN server -c $HY2_CONFIG
 Restart=on-failure
 RestartSec=5
+LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload && systemctl enable --now jiaoben-hy2
+    
+    # --- 生成分享链接 ---
     local ip=$(curl -s ifconfig.me || echo "IP")
-    local link="hysteria2://$pass@$ip:$port?insecure=1&sni=$domain#Hy2"
-    append_node "Hysteria2" "$link"
+    local share_host="$ip"
+    [[ "$ip" =~ : ]] && [[ ! "$ip" =~ \[ ]] && share_host="[${ip}]"
+    
+    local insecure_param=""
+    [ "$insecure" = "1" ] && insecure_param="&insecure=1"
+    
+    local mport_param=""
+    if [ "$port_hop_enabled" = "yes" ]; then
+        local hop_int_num="${port_hop_interval//s/}"
+        mport_param="&mport=${port_hop_range}&mportHopInt=${hop_int_num}"
+    fi
+    
+    local link="hysteria2://${pass}@${share_host}:${port}?sni=${sni}${mport_param}${insecure_param}#Hy2"
+    
+    # --- 保存节点信息 ---
+    cat >> "$NODES_FILE" <<INFO_EOF
+
+┌─────────────────────────────────────────────
+│  Hysteria2
+├─────────────────────────────────────────────
+│  地址: ${share_host}
+│  端口: ${port}
+│  端口跳跃: ${port_hop_enabled}
+│  密码: ${pass}
+│  SNI: ${sni}
+│  证书方式: ${cert_method}
+│  分享链接:
+${link}
+└─────────────────────────────────────────────
+INFO_EOF
+    
     success "Hysteria2 部署完成"
 }
 
@@ -445,7 +680,7 @@ main_menu() {
     echo -e "=========================================${NC}"
     echo "1. 部署 REALITY (VLESS)"
     echo "2. 部署 Argo 隧道 (VLESS)"
-    echo "3. 部署 Hysteria2"
+    echo "3. 部署 Hysteria2 (支持端口跳跃/ACME)"
     echo "4. 一键部署全部 (以上所有)"
     echo "5. 查看节点信息"
     echo "6. 停止/重启服务"
