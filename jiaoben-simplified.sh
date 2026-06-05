@@ -11,8 +11,19 @@ set -Euo pipefail
 VERSION="5.0"
 
 # --- 加载公共配置 ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || echo /tmp)"
+if [[ -f "$SCRIPT_DIR/common.sh" ]]; then
+    source "$SCRIPT_DIR/common.sh"
+else
+    COMMON_URL="https://raw.githubusercontent.com/fireflies1145/jiaoben/main/common.sh"
+    COMMON_TMP="/tmp/jiaoben-common.sh"
+    if [[ ! -f "$COMMON_TMP" ]]; then
+        echo "[INFO] Downloading common.sh..."
+        curl -fsSL "$COMMON_URL" -o "$COMMON_TMP" || { echo "[ERROR] Failed to download common.sh"; exit 1; }
+    fi
+    source "$COMMON_TMP"
+    SCRIPT_DIR="/tmp"
+fi
 
 # 设置错误陷阱
 set_error_trap
