@@ -24,17 +24,10 @@ export CYAN='\033[0;36m'
 export NC='\033[0m'
 
 # 日志函数
-log_info()  { echo -e "${GREEN}[INFO]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2; }
-log_error() { echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2; }
-
-# 错误处理：显式调用 error() 即可，不使用 trap ERR（避免误报）
-
-# --- 使用内置日志函数 ---
-info()    { log_info "$*"; }
-success() { log_info "$*"; }
-warn()    { log_warn "$*"; }
-error()   { log_error "$*"; exit 1; }
+info()    { echo -e "${GREEN}[INFO]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*"; }
+success() { echo -e "${GREEN}[INFO]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2; }
+error()   { echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2; exit 1; }
 
 # --- 路径 ---
 WORK_DIR="${WORKDIR_BASE}"
@@ -66,23 +59,16 @@ check_env() {
 }
 
 # --- 架构识别 ---
+# 用法: detect_arch          → amd64 / arm64
+#       detect_arch xray     → 64 / arm64-v8a
 detect_arch() {
+    local fmt="${1:-generic}"
     local arch
     arch=$(uname -m)
     case "$arch" in
-        x86_64|amd64) echo "amd64" ;;
-        aarch64|arm64) echo "arm64" ;;
-        *) echo "amd64" ;;
-    esac
-}
-
-detect_xray_arch() {
-    local arch
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64|amd64) echo "64" ;;
-        aarch64|arm64) echo "arm64-v8a" ;;
-        *) echo "64" ;;
+        x86_64|amd64) [[ "$fmt" == "xray" ]] && echo "64" || echo "amd64" ;;
+        aarch64|arm64) [[ "$fmt" == "xray" ]] && echo "arm64-v8a" || echo "arm64" ;;
+        *) [[ "$fmt" == "xray" ]] && echo "64" || echo "amd64" ;;
     esac
 }
 
@@ -193,7 +179,7 @@ get_xray_version() {
 download_xray() {
     [[ -f "$XRAY_BIN" ]] && return
     local arch
-    arch=$(detect_xray_arch)
+    arch=$(detect_arch xray)
     local version
     version=$(get_xray_version)
 
@@ -356,11 +342,12 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload && systemctl enable --now jiaoben-xray
+    systemctl daemon-reload && systemctl enable --now jiaoben-xray || error "REALITY 服务启动失败"
     local ip
     ip=$(get_public_ip)
     local real_link="vless://$uuid@$ip:443?type=tcp&security=reality&pbk=$pub&fp=chrome&sni=$domain&flow=xtls-rprx-vision&sid=$sid#REALITY"
     append_node "REALITY (VLESS)" "$real_link"
+    chmod 600 "$NODES_FILE"
     success "REALITY 部署完成"
 }
 
@@ -382,7 +369,7 @@ StandardError=append:${WORK_DIR}/argo.log
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload && systemctl enable --now jiaoben-argo
+    systemctl daemon-reload && systemctl enable --now jiaoben-argo || error "Argo 服务启动失败"
 }
 
 get_argo_domain() {
@@ -421,6 +408,7 @@ deploy_argo() {
 EOF
     fi
 
+    # 追加 Argo WebSocket inbound（不影响已有的 REALITY inbound）
     if ! jq --arg uuid "$uuid" --arg path "$path" \
         '.inbounds += [{"listen": "127.0.0.1", "port": 8080, "protocol": "vless", "settings": {"clients": [{"id": $uuid}], "decryption": "none"}, "streamSettings": {"network": "ws", "wsSettings": {"path": $path}}}]' \
         "$XRAY_CONFIG" > "${XRAY_CONFIG}.tmp"; then
@@ -438,6 +426,7 @@ EOF
     if argo_domain=$(get_argo_domain); then
         success "Argo 域名获取成功: $argo_domain"
     else
+    # 硬编码优选域名（TryCloudflare 分配的域名会过期）
         warn "Argo 域名获取超时，使用优选域名: yg1.ygkkk.dpdns.org"
         argo_domain="yg1.ygkkk.dpdns.org"
     fi
@@ -445,6 +434,7 @@ EOF
     encoded_path=$(printf '%s' "$path" | sed 's|/|%2F|g')
     local argo_link="vless://$uuid@${argo_domain}:443?encryption=none&type=ws&path=${encoded_path}&security=tls&sni=${argo_domain}&fp=chrome#Argo"
     append_node "Argo 隧道 (VLESS)" "$argo_link"
+    chmod 600 "$NODES_FILE"
     success "Argo 隧道部署完成"
 }
 
@@ -460,9 +450,7 @@ deploy_hy2() {
     while true; do
         read -r -p "监听端口（回车随机分配 10000-59999）: " port
         if [[ -z "$port" ]]; then
-            port=$(od -An -N2 -tu2 /dev/urandom | tr -d '[:space:]')
-            port=$(( port % 50000 + 10000 ))
-            port=$(( port > 59999 ? 59999 : port ))
+            port=$(( $(od -An -N2 -tu2 /dev/urandom | tr -d '[:space:]') % 50000 + 10000 ))
             info "随机端口: $port"
             break
         fi
@@ -685,7 +673,7 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload && systemctl enable --now jiaoben-hy2
+    systemctl daemon-reload && systemctl enable --now jiaoben-hy2 || error "Hysteria2 服务启动失败"
 
     # --- 生成分享链接 ---
     local ip
@@ -720,6 +708,7 @@ EOF
 ${link}
 └─────────────────────────────────────────────
 INFO_EOF
+    chmod 600 "$NODES_FILE"
 
     success "Hysteria2 部署完成"
 }
@@ -748,7 +737,7 @@ update_component() {
     [[ -f "$bin_path" ]] && cp "$bin_path" "$backup"
 
     rm -f "$bin_path"
-    if $download_fn; then
+    if "${download_fn}"; then
         rm -f "$backup"
         systemctl restart "$service" 2>/dev/null && success "$name 已更新并重启" || info "$name 已更新（服务未运行）"
     else
@@ -837,7 +826,7 @@ main_menu() {
     echo "3. 部署 Hysteria2 (支持端口跳跃/ACME)"
     echo "4. 一键部署全部 (以上所有)"
     echo "5. 查看节点信息"
-    echo "6. 停止/重启服务"
+    echo "6. 重启服务"
     echo "7. 更新组件"
     echo "8. 彻底卸载"
     echo "0. 退出"
