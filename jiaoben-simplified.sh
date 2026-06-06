@@ -28,8 +28,7 @@ log_info()  { echo -e "${GREEN}[INFO]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2; }
 log_error() { echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2; }
 
-# 手动错误陷阱（不依赖 set -e，避免与 ERR trap 冲突）
-trap 'log_error "脚本在第 ${LINENO} 行出错"' ERR
+# 错误处理：显式调用 error() 即可，不使用 trap ERR（避免误报）
 
 # --- 使用内置日志函数 ---
 info()    { log_info "$*"; }
@@ -49,7 +48,7 @@ NODES_FILE="${INFO_FILE}"
 
 # --- 已知稳定版本（GitHub API 不可用时的 fallback） ---
 KNOWN_XRAY_VERSION="v25.5.16"
-KNOWN_HY2_ARCH_SUFFIX="linux-amd64"
+
 
 # --- 参数支持 ---
 if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then
@@ -363,7 +362,6 @@ EOF
     local real_link="vless://$uuid@$ip:443?type=tcp&security=reality&pbk=$pub&fp=chrome&sni=$domain&flow=xtls-rprx-vision&sid=$sid#REALITY"
     append_node "REALITY (VLESS)" "$real_link"
     success "REALITY 部署完成"
-    print_nodes
 }
 
 # ============================================================
@@ -448,7 +446,6 @@ EOF
     local argo_link="vless://$uuid@${argo_domain}:443?encryption=none&type=ws&path=${encoded_path}&security=tls&sni=${argo_domain}&fp=chrome#Argo"
     append_node "Argo 隧道 (VLESS)" "$argo_link"
     success "Argo 隧道部署完成"
-    print_nodes
 }
 
 # ============================================================
@@ -725,7 +722,6 @@ ${link}
 INFO_EOF
 
     success "Hysteria2 部署完成"
-    print_nodes
 }
 
 # ============================================================
@@ -738,6 +734,28 @@ deploy_all() {
     deploy_hy2
     success "全部部署完成！"
     print_nodes
+}
+
+# --- 更新单个组件（安全方式：先下载再删旧） ---
+update_component() {
+    local name="$1"
+    local bin_path="$2"
+    local download_fn="$3"
+    local service="$4"
+
+    # 备份旧二进制
+    local backup="${bin_path}.bak"
+    [[ -f "$bin_path" ]] && cp "$bin_path" "$backup"
+
+    rm -f "$bin_path"
+    if $download_fn; then
+        rm -f "$backup"
+        systemctl restart "$service" 2>/dev/null && success "$name 已更新并重启" || info "$name 已更新（服务未运行）"
+    else
+        # 下载失败，恢复备份
+        [[ -f "$backup" ]] && mv "$backup" "$bin_path"
+        warn "$name 更新失败，已恢复旧版本"
+    fi
 }
 
 # ============================================================
@@ -754,27 +772,13 @@ update_services() {
     echo ""
     read -r -p "请选择 [0-4]: " update_choice
     case "$update_choice" in
-        1)
-            rm -f "$XRAY_BIN"
-            download_xray
-            systemctl restart jiaoben-xray 2>/dev/null && success "Xray 已更新并重启" || info "Xray 已更新（未运行）"
-            ;;
-        2)
-            rm -f "$HY2_BIN"
-            download_hy2
-            systemctl restart jiaoben-hy2 2>/dev/null && success "Hysteria2 已更新并重启" || info "Hysteria2 已更新（未运行）"
-            ;;
-        3)
-            rm -f "$ARGO_BIN"
-            download_argo
-            systemctl restart jiaoben-argo 2>/dev/null && success "Cloudflared 已更新并重启" || info "Cloudflared 已更新（未运行）"
-            ;;
+        1) update_component "Xray" "$XRAY_BIN" download_xray jiaoben-xray ;;
+        2) update_component "Hysteria2" "$HY2_BIN" download_hy2 jiaoben-hy2 ;;
+        3) update_component "Cloudflared" "$ARGO_BIN" download_argo jiaoben-argo ;;
         4)
-            rm -f "$XRAY_BIN" "$HY2_BIN" "$ARGO_BIN"
-            download_xray && systemctl restart jiaoben-xray 2>/dev/null || true
-            download_hy2 && systemctl restart jiaoben-hy2 2>/dev/null || true
-            download_argo && systemctl restart jiaoben-argo 2>/dev/null || true
-            success "所有组件已更新"
+            update_component "Xray" "$XRAY_BIN" download_xray jiaoben-xray
+            update_component "Hysteria2" "$HY2_BIN" download_hy2 jiaoben-hy2
+            update_component "Cloudflared" "$ARGO_BIN" download_argo jiaoben-argo
             ;;
         0) return ;;
         *) warn "无效选项" ;;
