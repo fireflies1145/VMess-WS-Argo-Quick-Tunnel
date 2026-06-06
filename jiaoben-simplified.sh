@@ -66,9 +66,12 @@ detect_arch() {
     local arch
     arch=$(uname -m)
     case "$arch" in
-        x86_64|amd64) [[ "$fmt" == "xray" ]] && echo "64" || echo "amd64" ;;
-        aarch64|arm64) [[ "$fmt" == "xray" ]] && echo "arm64-v8a" || echo "arm64" ;;
-        *) [[ "$fmt" == "xray" ]] && echo "64" || echo "amd64" ;;
+        x86_64|amd64)
+            if [[ "$fmt" == "xray" ]]; then echo "64"; else echo "amd64"; fi ;;
+        aarch64|arm64)
+            if [[ "$fmt" == "xray" ]]; then echo "arm64-v8a"; else echo "arm64"; fi ;;
+        *)
+            if [[ "$fmt" == "xray" ]]; then echo "64"; else echo "amd64"; fi ;;
     esac
 }
 
@@ -415,7 +418,7 @@ EOF
         error "Xray 配置更新失败（jq 错误），已保留原配置"
     fi
     mv "${XRAY_CONFIG}.tmp" "$XRAY_CONFIG"
-    systemctl restart jiaoben-xray
+    systemctl restart jiaoben-xray 2>/dev/null || true
 
     # 停止旧进程，使用 systemd 管理
     pkill cloudflared 2>/dev/null || true
@@ -785,8 +788,11 @@ restart_services() {
     local found=0
     for svc in xray hy2 argo; do
         if service_exists "$svc"; then
-            systemctl restart "jiaoben-$svc"
-            success "已重启 jiaoben-$svc"
+            if systemctl restart "jiaoben-$svc" 2>/dev/null; then
+                success "已重启 jiaoben-$svc"
+            else
+                warn "jiaoben-$svc 重启失败"
+            fi
             found=1
         fi
     done
