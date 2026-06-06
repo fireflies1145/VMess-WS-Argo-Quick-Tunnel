@@ -363,6 +363,7 @@ EOF
     local real_link="vless://$uuid@$ip:443?type=tcp&security=reality&pbk=$pub&fp=chrome&sni=$domain&flow=xtls-rprx-vision&sid=$sid#REALITY"
     append_node "REALITY (VLESS)" "$real_link"
     success "REALITY 部署完成"
+    print_nodes
 }
 
 # ============================================================
@@ -447,6 +448,7 @@ EOF
     local argo_link="vless://$uuid@${argo_domain}:443?encryption=none&type=ws&path=${encoded_path}&security=tls&sni=${argo_domain}&fp=chrome#Argo"
     append_node "Argo 隧道 (VLESS)" "$argo_link"
     success "Argo 隧道部署完成"
+    print_nodes
 }
 
 # ============================================================
@@ -723,6 +725,7 @@ ${link}
 INFO_EOF
 
     success "Hysteria2 部署完成"
+    print_nodes
 }
 
 # ============================================================
@@ -733,6 +736,8 @@ deploy_all() {
     deploy_reality
     deploy_argo
     deploy_hy2
+    success "全部部署完成！"
+    print_nodes
 }
 
 # ============================================================
