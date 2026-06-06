@@ -20,7 +20,7 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; }
 success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
 
 # --- 配置 ---
-WORK_BASE="/root/.jiaoben"
+WORK_BASE="${HOME}/.jiaoben"
 SERVICES=(
     "jiaoben-xray"
     "jiaoben-hy2"
@@ -155,7 +155,7 @@ show_completion_info() {
     echo "  ✓ 残留进程"
     echo ""
     echo "如需重新部署，请运行："
-    echo "  bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/all-in-one.sh)"
+    echo "  bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/jiaoben-simplified.sh)"
     echo ""
 }
 

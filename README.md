@@ -55,7 +55,6 @@ sudo bash jiaoben-simplified.sh --version   # 显示版本号
 jiaoben/
 ├── jiaoben-simplified.sh    # ⭐ 精简版一键脚本（推荐）
 ├── jb_improved.sh           # 运维管理工具
-├── hy2.sh                   # Hysteria2 独立部署脚本
 ├── common.sh                # 公共函数库（供扩展脚本使用）
 ├── uninstall.sh             # 卸载脚本
 └── docs/
@@ -150,4 +149,4 @@ MIT License - 详见 [LICENSE](LICENSE)
 
 ---
 
-**当前版本**: v4.1 (2026-05-29)
+**当前版本**: v5.0 (2026-06-06)

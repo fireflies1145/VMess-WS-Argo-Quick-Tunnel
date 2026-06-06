@@ -3,7 +3,7 @@
 # 所有脚本都应该通过 source 加载此文件以保证一致性
 
 # 基础路径配置
-export WORKDIR_BASE="/root/.jiaoben"
+export WORKDIR_BASE="${HOME}/.jiaoben"
 export INFO_FILE="${WORKDIR_BASE}/all_nodes_info.txt"
 export CONFIG_DIR="${WORKDIR_BASE}/config"
 export LOG_DIR="${WORKDIR_BASE}/logs"
