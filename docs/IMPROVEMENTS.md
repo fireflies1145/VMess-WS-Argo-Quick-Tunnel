@@ -37,7 +37,7 @@
 
 | 文件 | 变更说明 |
 |------|---------|
-| `jiaoben-simplified.sh` | 全面重写，所有 bug 修复和优化 |
+| `install.sh` | 全面重写，所有 bug 修复和优化 |
 | `common.sh` | 更新 `generate_uuid()` 使用 openssl，添加 `set -E` |
 | `uninstall.sh` | 统一路径配置，添加错误陷阱 |
 | `jb_improved.sh` | 修复 sudo 检查，统一版本号 |
@@ -49,18 +49,18 @@
 
 ```bash
 # 测试版本号
-sudo bash jiaoben-simplified.sh --version
+sudo bash install.sh --version
 
 # 测试 JSON 验证
 echo '{"test": true}' > /tmp/test.json
-bash -c 'source jiaoben-simplified.sh; validate_json /tmp/test.json && echo "OK"'
+bash -c 'source install.sh; validate_json /tmp/test.json && echo "OK"'
 
 # 测试 SHA256 验证
 echo "test" > /tmp/test.file
 sha256sum /tmp/test.file
 
 # 测试 IP 检测
-bash -c 'source jiaoben-simplified.sh; get_public_ip'
+bash -c 'source install.sh; get_public_ip'
 ```
 
 ### 🔒 安全建议（仍然适用）

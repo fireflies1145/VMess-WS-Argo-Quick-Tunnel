@@ -164,7 +164,7 @@ show_completion_info() {
     echo "  ✓ 残留进程"
     echo ""
     echo "如需重新部署，请运行："
-    echo "  bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/jiaoben-simplified.sh)"
+    echo "  bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/install.sh)"
     echo ""
 }
 

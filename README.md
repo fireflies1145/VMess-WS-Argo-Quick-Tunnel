@@ -25,7 +25,7 @@
 ### 一键部署
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/jiaoben-simplified.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/install.sh)
 ```
 
 ### 本地部署
@@ -33,7 +33,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/j
 ```bash
 git clone https://github.com/fireflies1145/jiaoben.git
 cd jiaoben
-sudo bash jiaoben-simplified.sh
+sudo bash install.sh
 ```
 
 ### 菜单选项
@@ -52,14 +52,14 @@ sudo bash jiaoben-simplified.sh
 ### 参数支持
 
 ```bash
-sudo bash jiaoben-simplified.sh --version   # 显示版本号
+sudo bash install.sh --version   # 显示版本号
 ```
 
 ## 📋 项目结构
 
 ```
 jiaoben/
-├── jiaoben-simplified.sh    # ⭐ 精简版一键脚本（推荐）
+├── install.sh    # ⭐ 精简版一键脚本（推荐）
 ├── jb_improved.sh           # 运维管理工具
 ├── common.sh                # 公共函数库（供扩展脚本使用）
 ├── uninstall.sh             # 卸载脚本
@@ -118,7 +118,7 @@ journalctl -u jiaoben-xray -n 50
 
 **方式一：脚本菜单（推荐）**
 ```bash
-sudo bash jiaoben-simplified.sh
+sudo bash install.sh
 # 选择 8 → 确认 y
 ```
 
@@ -139,7 +139,7 @@ systemctl status jiaoben-xray
 journalctl -u jiaoben-xray -n 50
 
 # 调试模式运行脚本
-sudo bash -x jiaoben-simplified.sh
+sudo bash -x install.sh
 
 # 检查网络连接
 curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq .tag_name
@@ -157,4 +157,4 @@ MIT License - 详见 [LICENSE](LICENSE)
 
 ---
 
-**当前版本**: v6.0 (2026-06-07)
+**当前版本**: v4.2 (2026-06-07)
