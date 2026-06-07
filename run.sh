@@ -783,7 +783,28 @@ EOF
         path="/$(gen_hex 8)"
 
         backup_config
-        cat > "$XRAY_CONFIG" <<EOF
+
+        # 如果已有 config（一键部署合并），追加 inbound 而不是覆盖
+        if [[ -f "$XRAY_CONFIG" ]] && jq -e '.inbounds[0]' "$XRAY_CONFIG" &>/dev/null; then
+            local tmp_json
+            tmp_json=$(jq --argjson port $argo_port --arg uuid "$uuid" --arg path "$path" '
+                .inbounds += [{
+                    "port": $port,
+                    "protocol": "vless",
+                    "settings": {
+                        "clients": [{ "id": $uuid }],
+                        "decryption": "none"
+                    },
+                    "streamSettings": {
+                        "network": "ws",
+                        "wsSettings": { "path": $path }
+                    },
+                    "sniffing": { "enabled": true, "destOverride": ["http","tls"] }
+                }]
+            ' "$XRAY_CONFIG")
+            echo "$tmp_json" > "$XRAY_CONFIG"
+        else
+            cat > "$XRAY_CONFIG" <<EOF
 {
   "log": { "loglevel": "warning" },
   "inbounds": [{
@@ -802,6 +823,7 @@ EOF
   "outbounds": [{ "protocol": "freedom" }]
 }
 EOF
+        fi
         chmod 600 "$XRAY_CONFIG"
 
         cat > "/etc/systemd/system/jiaoben-xray.service" <<EOF
@@ -821,7 +843,8 @@ WantedBy=multi-user.target
 EOF
 
         systemctl daemon-reload
-        systemctl enable --now jiaoben-xray
+        systemctl restart jiaoben-xray
+        _log_info "Xray 已重启，加载 Argo 配置"
 
         cat > "/etc/systemd/system/jiaoben-argo.service" <<EOF
 [Unit]
