@@ -91,7 +91,7 @@ journalctl -u jiaoben-xray -n 50
 
 ```
 ~/.jiaoben/
-├── nodes.txt               # 节点链接信息
+├── all_nodes_info.txt        # 节点链接信息
 ├── config.json              # Xray 配置
 ├── config.json.bak.*        # 配置备份（自动）
 ├── hy2_config.yaml          # Hysteria2 配置

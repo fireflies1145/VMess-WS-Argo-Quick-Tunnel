@@ -99,14 +99,21 @@ cleanup_processes() {
 cleanup_firewall() {
     info "正在清理防火墙规则..."
     # 清理 UFW 规则
-    if command -v ufw &>/dev/null; then
-        ufw status 2>/dev/null | grep -i "jiaoben" || true
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
+        # 删除允许 Hysteria2 常用端口范围的规则
+        ufw delete allow proto udp from any to any port 10000:59999 2>/dev/null || true
+        info "UFW 规则已清理"
     fi
-    # 清理持久化规则文件
-    if [[ -f "/etc/iptables/rules.v4" ]]; then
-        info "保留 iptables 持久化规则（可能包含其他服务的规则）"
+    # 清理 iptables 规则
+    if command -v iptables &>/dev/null; then
+        iptables -D INPUT -p udp --dport 10000:59999 -j ACCEPT 2>/dev/null || true
+        # 持久化清理后的规则
+        if command -v iptables-save &>/dev/null && [[ -d /etc/iptables ]]; then
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            info "iptables 持久化规则已更新"
+        fi
     fi
-    info "防火墙清理完成"
+    success "防火墙规则清理完成"
 }
 
 confirm_uninstall() {

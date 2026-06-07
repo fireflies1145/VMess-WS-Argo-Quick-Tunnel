@@ -48,9 +48,38 @@ ARGO_LOG="${WORK_DIR}/argo.log"
 KNOWN_XRAY_VERSION="v25.5.16"
 
 # --- 参数支持 ---
+show_help() {
+    cat << 'HELP'
+jiaoben - 代理节点一键部署系统
+
+用法: sudo bash jiaoben-simplified.sh [选项]
+
+选项:
+  --version, -v    显示版本号
+  --help, -h       显示此帮助信息
+
+菜单选项:
+  1. 部署 REALITY (VLESS)     # 端口 443，高性能
+  2. 部署 Argo 隧道 (VLESS)   # 无需暴露真实 IP
+  3. 部署 Hysteria2           # 基于 QUIC，低延迟
+  4. 一键部署全部
+  5. 查看节点信息
+  6. 重启服务
+  7. 更新组件
+  8. 彻底卸载
+
+配置文件: ~/.jiaoben/
+项目地址: https://github.com/fireflies1145/jiaoben
+HELP
+    exit 0
+}
+
 if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then
     echo "jiaoben v${VERSION}"
     exit 0
+fi
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    show_help
 fi
 
 # --- 权限与目录检查 ---
@@ -163,13 +192,22 @@ download_sha256() {
 # --- 包管理器安装依赖 ---
 install_deps() {
     info "检查安装依赖..."
+    local rc=0
     if command -v apt-get &>/dev/null; then
-        apt-get update -qq && apt-get install -y -qq curl wget unzip jq openssl coreutils >/dev/null 2>&1
+        apt-get update -qq && apt-get install -y -qq curl wget unzip jq openssl coreutils >/dev/null 2>&1 || rc=1
     elif command -v dnf &>/dev/null; then
-        dnf install -y -q curl wget unzip jq openssl coreutils >/dev/null 2>&1
+        dnf install -y -q curl wget unzip jq openssl coreutils >/dev/null 2>&1 || rc=1
     elif command -v yum &>/dev/null; then
-        yum install -y -q curl wget unzip jq openssl coreutils >/dev/null 2>&1
+        yum install -y -q curl wget unzip jq openssl coreutils >/dev/null 2>&1 || rc=1
     fi
+    if [[ $rc -ne 0 ]]; then
+        error "依赖安装失败，请手动安装: curl wget unzip jq openssl coreutils"
+    fi
+    # 验证关键命令
+    for cmd in curl wget jq openssl; do
+        command -v "$cmd" &>/dev/null || error "依赖 ${cmd} 未安装或不在 PATH 中"
+    done
+    info "依赖检查通过 ✓"
 }
 
 # --- GitHub API 请求（支持 GITHUB_TOKEN 鉴权） ---
@@ -447,7 +485,9 @@ EOF
     local ip
     ip=$(get_public_ip)
     validate_ip "$ip"
-    local real_link="vless://${uuid}@${ip}:443?type=tcp&security=reality&pbk=${pub}&fp=chrome&sni=${domain}&flow=xtls-rprx-vision&sid=${sid}#REALITY"
+    local host="$ip"
+    [[ "$ip" =~ : ]] && [[ ! "$ip" =~ \[ ]] && host="[${ip}]"
+    local real_link="vless://${uuid}@${host}:443?type=tcp&security=reality&pbk=${pub}&fp=chrome&sni=${domain}&flow=xtls-rprx-vision&sid=${sid}#REALITY"
     append_node "REALITY (VLESS)" "$real_link"
     chmod 600 "$NODES_FILE"
     success "REALITY 部署完成"
@@ -564,7 +604,7 @@ deploy_hy2() {
     while true; do
         read -r -p "监听端口（回车随机分配 10000-59999）: " port
         if [[ -z "$port" ]]; then
-            port=$(( $(od -An -N2 -tu2 /dev/urandom | tr -d '[:space:]') % 50000 + 10000 ))
+            port=$(( RANDOM % 50000 + 10000 ))
             info "随机端口: ${port}"
             break
         fi
@@ -910,6 +950,22 @@ uninstall_all() {
         fi
     done
     pkill cloudflared 2>/dev/null || true
+
+    # 清理防火墙规则
+    info "正在清理防火墙规则..."
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
+        ufw status numbered 2>/dev/null | grep -i "jiaoben\|10000:59999" || true
+    fi
+    if command -v iptables &>/dev/null; then
+        # 尝试删除常见的 Hysteria2 端口规则
+        for rule_port in 10000:59999; do
+            iptables -D INPUT -p udp --dport "$rule_port" -j ACCEPT 2>/dev/null || true
+        done
+        if command -v iptables-save &>/dev/null; then
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+        fi
+    fi
+
     rm -rf "$WORK_DIR"
     systemctl daemon-reload
     success "已彻底卸载"
