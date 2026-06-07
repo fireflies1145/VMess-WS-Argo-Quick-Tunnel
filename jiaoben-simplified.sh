@@ -641,4 +641,330 @@ backup_config() {
 
 # ==========================================
 # 服务存在性检查（修复版）
-# ========================
+# ==========================================
+service_exists() {
+    [[ -f "/etc/systemd/system/jiaoben-$1.service" ]]
+}
+
+# ==========================================
+# 核心部署逻辑
+# ==========================================
+deploy_core() {
+    local mode=$1
+    install_deps
+
+    # mode 4 不清空节点文件（累积），其他模式清空
+    [[ "$mode" -eq 4 ]] || : > "$NODES_FILE"
+
+    # --- REALITY (VLESS) ---
+    if [[ "$mode" -eq 1 || "$mode" -eq 4 ]]; then
+        download_xray
+        check_port 443 tcp || warn "端口 443 冲突，REALITY 可能启动失败"
+
+        info "正在配置 REALITY..."
+        local uuid priv pub sid domain
+        uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "")
+        [[ -z "$uuid" ]] && uuid=$(od -An -N16 -x /dev/urandom | tr -d '[:space:]' | sed 's/^\(.\{8\}\)\(.\{4\}\)\(.\{4\}\)\(.\{4\}\)/\1-\2-4\3-\4-/')
+        local keys
+        keys=$(generate_keys)
+        priv=$(echo "$keys" | cut -d: -f1)
+        pub=$(echo "$keys" | cut -d: -f2)
+        sid=$(openssl rand -hex 8 2>/dev/null || od -An -N8 -x /dev/urandom | tr -d '[:space:]')
+        domain="www.microsoft.com"
+
+        backup_config
+        cat > "$XRAY_CONFIG" <<EOF
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [{
+    "port": 443,
+    "protocol": "vless",
+    "settings": {
+      "clients": [{ "id": "$uuid", "flow": "xtls-rprx-vision" }],
+      "decryption": "none"
+    },
+    "streamSettings": {
+      "network": "tcp",
+      "security": "reality",
+      "realitySettings": {
+        "show": false,
+        "dest": "${domain}:443",
+        "xver": 0,
+        "serverNames": ["$domain"],
+        "privateKey": "$priv",
+        "shortIds": ["$sid"]
+      }
+    },
+    "sniffing": { "enabled": true, "destOverride": ["http","tls"] }
+  }],
+  "outbounds": [{ "protocol": "freedom" }]
+}
+EOF
+        chmod 600 "$XRAY_CONFIG"
+
+        cat > "/etc/systemd/system/jiaoben-xray.service" <<EOF
+[Unit]
+Description=jiaoben Xray Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${XRAY_BIN} run -config ${XRAY_CONFIG}
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+        systemctl daemon-reload
+        systemctl enable --now jiaoben-xray
+
+        local reality_link="vless://${uuid}@$(curl -s4 ifconfig.me 2>/dev/null || curl -s6 ifconfig.me 2>/dev/null || echo 'YOUR_IP'):443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${domain}&fp=chrome&pbk=${pub}&sid=${sid}&type=tcp&headerType=none#REALITY"
+        append_node "REALITY (VLESS)" "$reality_link"
+        success "REALITY 部署完成！"
+    fi
+
+    # --- Argo 隧道 ---
+    if [[ "$mode" -eq 2 || "$mode" -eq 4 ]]; then
+        download_xray
+        download_argo
+
+        local argo_port=""
+        while true; do
+            read -p "Argo 本地端口（回车随机）: " argo_port
+            if [[ -z "$argo_port" ]]; then
+                argo_port=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d '[:space:]')
+                argo_port=$(( argo_port % 40000 + 20000 ))
+                info "随机端口: $argo_port"
+                break
+            fi
+            if [[ "$argo_port" =~ ^[0-9]+$ ]] && [[ "$argo_port" -ge 1 ]] && [[ "$argo_port" -le 65535 ]]; then
+                if check_port "$argo_port" tcp; then
+                    break
+                fi
+            else
+                warn "端口号无效"
+            fi
+        done
+
+        local uuid path
+        uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "")
+        [[ -z "$uuid" ]] && uuid=$(od -An -N16 -x /dev/urandom | tr -d '[:space:]' | sed 's/^\(.\{8\}\)\(.\{4\}\)\(.\{4\}\)\(.\{4\}\)/\1-\2-4\3-\4-/')
+        path="/$(openssl rand -hex 8 2>/dev/null || od -An -N8 -x /dev/urandom | tr -d '[:space:]')"
+
+        backup_config
+        cat > "$XRAY_CONFIG" <<EOF
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [{
+    "port": $argo_port,
+    "protocol": "vless",
+    "settings": {
+      "clients": [{ "id": "$uuid" }],
+      "decryption": "none"
+    },
+    "streamSettings": {
+      "network": "ws",
+      "wsSettings": { "path": "$path" }
+    },
+    "sniffing": { "enabled": true, "destOverride": ["http","tls"] }
+  }],
+  "outbounds": [{ "protocol": "freedom" }]
+}
+EOF
+        chmod 600 "$XRAY_CONFIG"
+
+        # Xray service
+        cat > "/etc/systemd/system/jiaoben-xray.service" <<EOF
+[Unit]
+Description=jiaoben Xray Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${XRAY_BIN} run -config ${XRAY_CONFIG}
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+        systemctl daemon-reload
+        systemctl enable --now jiaoben-xray
+
+        # Cloudflared service
+        cat > "/etc/systemd/system/jiaoben-argo.service" <<EOF
+[Unit]
+Description=jiaoben Cloudflared Argo Tunnel
+After=network.target jiaoben-xray.service
+
+[Service]
+Type=simple
+ExecStart=${ARGO_BIN} tunnel --url http://127.0.0.1:${argo_port} --no-autoupdate
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:${WORK_DIR}/argo.log
+StandardError=append:${WORK_DIR}/argo.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+        systemctl daemon-reload
+        systemctl enable --now jiaoben-argo
+
+        # 获取 Argo 域名
+        local argo_domain=""
+        info "等待 Argo 隧道建立（最多 15 秒）..."
+        if argo_domain=$(get_argo_domain); then
+            success "Argo 域名获取成功: $argo_domain"
+        else
+            warn "Argo 域名获取超时，使用备用域名"
+            # 多个备用域名
+            local fallback_domains=("yg1.ygkkk.dpdns.org" "argo.xxx.xxx")
+            argo_domain="${fallback_domains[0]}"
+            warn "如果备用域名失效，请查看日志: cat ${WORK_DIR}/argo.log"
+        fi
+
+        local encoded_path
+        encoded_path=$(printf '%s' "$path" | sed 's|/|%2F|g')
+        local argo_link="vless://${uuid}@${argo_domain}:443?encryption=none&type=ws&path=${encoded_path}&security=tls&sni=${argo_domain}&fp=chrome#Argo"
+        append_node "Argo 隧道 (VLESS)" "$argo_link"
+        success "Argo 部署完成！"
+    fi
+
+    # --- Hysteria2 ---
+    if [[ "$mode" -eq 3 || "$mode" -eq 4 ]]; then
+        deploy_hy2
+    fi
+
+    clear
+    print_nodes
+    success "部署任务完成！"
+}
+
+# ==========================================
+# 服务管理
+# ==========================================
+restart_services() {
+    local found=0
+    for svc in xray hy2 argo; do
+        if service_exists "$svc"; then
+            systemctl restart "jiaoben-$svc"
+            success "已重启 jiaoben-$svc"
+            found=1
+        fi
+    done
+    [[ $found -eq 0 ]] && warn "未发现任何 jiaoben 服务"
+}
+
+stop_services() {
+    local found=0
+    for svc in xray hy2 argo; do
+        if service_exists "$svc"; then
+            systemctl stop "jiaoben-$svc"
+            success "已停止 jiaoben-$svc"
+            found=1
+        fi
+    done
+    [[ $found -eq 0 ]] && warn "未发现任何 jiaoben 服务"
+}
+
+# ==========================================
+# 卸载
+# ==========================================
+uninstall_all() {
+    echo ""
+    warn "⚠️  即将删除所有 jiaoben 组件和配置！"
+    echo ""
+    echo "以下将被删除："
+    echo "  1. 所有 systemd 服务 (jiaoben-xray, jiaoben-hy2, jiaoben-argo)"
+    echo "  2. 工作目录: $WORK_DIR"
+    echo "  3. 所有配置文件和密钥"
+    echo ""
+    read -p "确认卸载？请输入 yes 确认: " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        info "已取消"
+        return
+    fi
+
+    info "正在卸载所有组件..."
+
+    for svc in xray hy2 argo; do
+        if service_exists "$svc"; then
+            systemctl disable --now "jiaoben-$svc" 2>/dev/null || true
+            rm -f "/etc/systemd/system/jiaoben-${svc}.service"
+            info "已移除 jiaoben-$svc"
+        fi
+    done
+
+    # 停止残留进程（使用正确的 pkill）
+    for proc in cloudflared xray hysteria; do
+        if pgrep -f "$proc" >/dev/null 2>&1; then
+            info "终止残留进程: $proc"
+            pkill -9 -f "$proc" 2>/dev/null || killall -9 "$proc" 2>/dev/null || true
+        fi
+    done
+
+    rm -rf "$WORK_DIR"
+    systemctl daemon-reload
+    success "已彻底卸载"
+}
+
+# ==========================================
+# 主菜单
+# ==========================================
+main_menu() {
+    clear
+    echo -e "${CYAN}=========================================${NC}"
+    echo -e "${CYAN}   jiaoben 一键脚本 v${VERSION}${NC}"
+    echo -e "${CYAN}=========================================${NC}"
+    echo "1. 部署 REALITY (VLESS)       — 端口 443，高性能"
+    echo "2. 部署 Argo 隧道 (VLESS)     — 无需暴露真实 IP"
+    echo "3. 部署 Hysteria2             — 基于 QUIC，低延迟"
+    echo "4. 一键部署全部"
+    echo "5. 查看节点信息"
+    echo "6. 停止/重启服务"
+    echo "7. 彻底卸载"
+    echo "0. 退出"
+    echo -e "${CYAN}=========================================${NC}"
+    read -p "请选择 [0-7]: " choice
+
+    case $choice in
+        1) deploy_core 1 ;;
+        2) deploy_core 2 ;;
+        3) deploy_core 3 ;;
+        4) : > "$NODES_FILE"; deploy_core 4 ;;
+        5) print_nodes ;;
+        6)
+            echo ""
+            echo "1) 重启所有服务"
+            echo "2) 停止所有服务"
+            read -p "请选择 [1-2]: " sub
+            case $sub in
+                1) restart_services ;;
+                2) stop_services ;;
+                *) warn "无效选择" ;;
+            esac
+            ;;
+        7) uninstall_all ;;
+        0) exit 0 ;;
+        *) main_menu ;;
+    esac
+}
+
+# ==========================================
+# 入口
+# ==========================================
+check_env
+
+while true; do
+    main_menu
+    echo ""
+    read -n 1 -s -r -p "按任意键返回主菜单..."
+    echo ""
+done
