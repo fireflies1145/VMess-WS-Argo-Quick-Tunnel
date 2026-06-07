@@ -25,7 +25,7 @@
 ### 一键部署
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/setup.sh)
 ```
 
 ### 本地部署
@@ -33,7 +33,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/i
 ```bash
 git clone https://github.com/fireflies1145/jiaoben.git
 cd jiaoben
-sudo bash install.sh
+sudo bash setup.sh
 ```
 
 ### 菜单选项
@@ -52,17 +52,17 @@ sudo bash install.sh
 ### 参数支持
 
 ```bash
-sudo bash install.sh --version   # 显示版本号
+sudo bash setup.sh --version   # 显示版本号
 ```
 
 ## 📋 项目结构
 
 ```
 jiaoben/
-├── install.sh    # ⭐ 精简版一键脚本（推荐）
+├── setup.sh    # ⭐ 精简版一键脚本（推荐）
 ├── jb_improved.sh           # 运维管理工具
 ├── common.sh                # 公共函数库（供扩展脚本使用）
-├── uninstall.sh             # 卸载脚本
+├── unsetup.sh             # 卸载脚本
 └── docs/
     ├── CHANGELOG.md
     ├── IMPROVEMENTS.md
@@ -118,13 +118,13 @@ journalctl -u jiaoben-xray -n 50
 
 **方式一：脚本菜单（推荐）**
 ```bash
-sudo bash install.sh
+sudo bash setup.sh
 # 选择 8 → 确认 y
 ```
 
 **方式二：独立卸载脚本**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/uninstall.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/unsetup.sh)
 ```
 
 卸载会自动：停止所有服务 → 删除 systemd 文件 → 清理进程 → 删除工作目录 → 清理防火墙
@@ -139,7 +139,7 @@ systemctl status jiaoben-xray
 journalctl -u jiaoben-xray -n 50
 
 # 调试模式运行脚本
-sudo bash -x install.sh
+sudo bash -x setup.sh
 
 # 检查网络连接
 curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq .tag_name
