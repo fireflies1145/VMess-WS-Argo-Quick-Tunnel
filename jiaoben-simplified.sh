@@ -315,18 +315,32 @@ download_argo() {
 
 # --- 密钥生成 ---
 generate_keys() {
+    if [[ ! -f "$XRAY_BIN" ]]; then
+        error "Xray 二进制不存在: ${XRAY_BIN}"
+    fi
+    if [[ ! -x "$XRAY_BIN" ]]; then
+        chmod +x "$XRAY_BIN"
+    fi
     local output
-    output=$("$XRAY_BIN" x25519 2>/dev/null) || error "Xray x25519 命令执行失败"
+    output=$("$XRAY_BIN" x25519 2>&1) || {
+        warn "Xray x25519 输出: ${output}"
+        error "Xray x25519 命令执行失败，请检查二进制是否兼容当前系统"
+    }
     local priv pub
     priv=$(echo "$output" | grep -oP 'Private key:\s*\K\S+')
     pub=$(echo "$output" | grep -oP 'Public key:\s*\K\S+')
+    # fallback: 旧版 xray 输出格式
     if [[ -z "$priv" || -z "$pub" ]]; then
         local keys
         keys=$(echo "$output" | grep -oE '[A-Za-z0-9+/_-]{43,44}')
         priv=$(echo "$keys" | head -1)
         pub=$(echo "$keys" | head -2 | tail -1)
     fi
-    [[ -z "$priv" || -z "$pub" ]] && error "生成密钥失败，请检查 Xray 二进制"
+    # 最终校验
+    if [[ -z "$priv" || -z "$pub" ]]; then
+        warn "Xray x25519 原始输出: ${output}"
+        error "生成密钥失败：无法解析密钥对，请检查 Xray 二进制版本"
+    fi
     echo "${priv}:${pub}"
 }
 
@@ -449,6 +463,10 @@ deploy_reality() {
     local domain="www.microsoft.com"
 
     backup_config
+    # 最终安全检查：密钥非空
+    [[ -z "$priv" ]] && error "privateKey 为空，部署中止"
+    [[ -z "$pub" ]] && error "publicKey 为空，部署中止"
+    [[ -z "$uuid" ]] && error "UUID 为空，部署中止"
     cat > "$XRAY_CONFIG" <<EOF
 {
   "log": {"loglevel": "warning"},
