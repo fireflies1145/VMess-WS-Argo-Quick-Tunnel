@@ -19,16 +19,16 @@ export CYAN='\033[0;36m'
 export NC='\033[0m'
 
 # --- 日志函数 ---
-log_info() { echo -e "${GREEN}[INFO]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2; }
-log_error() { echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2; }
+log_info()  { echo -e "${GREEN}[INFO]${NC}    $(date '+%Y-%m-%d %H:%M:%S') - $1"; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC}    $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2; }
+log_error() { echo -e "${RED}[ERROR]${NC}   $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $1"; }
 
 # 简写别名
-info() { log_info "$*"; }
+info()    { log_info "$*"; }
 success() { log_success "$*"; }
-warn() { log_warn "$*"; }
-error() { log_error "$*"; exit 1; }
+warn()    { log_warn "$*"; }
+error()   { log_error "$*"; exit 1; }
 
 # --- 文件权限设置 ---
 secure_file() {

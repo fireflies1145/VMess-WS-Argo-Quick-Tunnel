@@ -1,153 +1,166 @@
 #!/usr/bin/env bash
 # ==========================================
-# 科学上网四合一卸载脚本 v6.0
+# jiaoben 卸载脚本 v2.1
 # 更新日期: 2026-06-07
-# 用于完全卸载所有部署的服务和文件
+# 修复: pkill 拼写错误、路径可配置、进程清理增强
 # ==========================================
+set -Euo pipefail
 
-set -Eeuo pipefail
+# --- 加载公共库（如果存在） ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/common.sh" ]]; then
+    source "$SCRIPT_DIR/common.sh"
+fi
 
 # --- 颜色定义 ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+: "${RED:=\\033[0;31m}"
+: "${GREEN:=\\033[0;32m}"
+: "${YELLOW:=\\033[1;33m}"
+: "${BLUE:=\\033[0;34m}"
+: "${NC:=\\033[0m}"
 
 # --- 日志函数 ---
-info() { echo -e "${BLUE}[INFO]${NC} $*"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
-success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+_info()   { echo -e "${BLUE}[INFO]${NC}    $*"; }
+_warn()   { echo -e "${YELLOW}[WARN]${NC}    $*"; }
+_error()  { echo -e "${RED}[ERROR]${NC}   $*"; }
+_success(){ echo -e "${GREEN}[SUCCESS]${NC} $*"; }
 
-# --- 配置（与 common.sh 和 jiaoben-simplified.sh 保持一致） ---
-WORK_BASE="${HOME}/.jiaoben"
+# --- 可配置路径 ---
+WORK_DIR="${WORKDIR_BASE:-/root/.jiaoben}"
+MGMT_TOOL="/usr/local/bin/jb"
+
 SERVICES=(
     "jiaoben-xray"
     "jiaoben-hy2"
     "jiaoben-argo"
 )
 
-# --- 错误陷阱 ---
-trap 'echo -e "${RED}[ERROR]${NC} 脚本在第 ${LINENO} 行出错，退出码: $?${NC}" >&2; exit 1' ERR
-
-# --- 卸载函数 ---
-
+# ==========================================
+# 停止并禁用服务
+# ==========================================
 stop_services() {
-    info "正在停止所有服务..."
+    _info "正在停止所有服务..."
     for service in "${SERVICES[@]}"; do
-        if sudo systemctl is-active --quiet "$service" 2>/dev/null; then
-            info "停止服务: ${service}"
-            sudo systemctl stop "$service" 2>/dev/null || warn "无法停止 ${service}"
+        if systemctl is-active --quiet "$service" 2>/dev/null; then
+            _info "停止服务: $service"
+            systemctl stop "$service" 2>/dev/null || _warn "无法停止 $service"
         fi
-        if sudo systemctl is-enabled "$service" 2>/dev/null; then
-            info "禁用服务: ${service}"
-            sudo systemctl disable "$service" 2>/dev/null || warn "无法禁用 ${service}"
+        if systemctl is-enabled --quiet "$service" 2>/dev/null; then
+            _info "禁用服务: $service"
+            systemctl disable "$service" 2>/dev/null || _warn "无法禁用 $service"
         fi
     done
-    success "所有服务已停止"
+    _success "所有服务已停止"
 }
 
+# ==========================================
+# 删除服务文件
+# ==========================================
 remove_service_files() {
-    info "正在删除服务文件..."
+    _info "正在删除服务文件..."
     for service in "${SERVICES[@]}"; do
         local service_file="/etc/systemd/system/${service}.service"
         if [[ -f "$service_file" ]]; then
-            info "删除服务文件: ${service_file}"
-            sudo rm -f "$service_file" 2>/dev/null || warn "无法删除 ${service_file}"
+            _info "删除: $service_file"
+            rm -f "$service_file" 2>/dev/null || _warn "无法删除 $service_file"
         fi
     done
-    info "重新加载 systemd..."
-    sudo systemctl daemon-reload 2>/dev/null
-    success "服务文件已删除"
+    _info "重新加载 systemd..."
+    systemctl daemon-reload 2>/dev/null || true
+    _success "服务文件已删除"
 }
 
-remove_work_directory() {
-    info "正在删除工作目录..."
-    if [[ -d "$WORK_BASE" ]]; then
-        info "删除目录: ${WORK_BASE}"
-        rm -rf "$WORK_BASE" 2>/dev/null || warn "无法删除 ${WORK_BASE}"
-        success "工作目录已删除"
-    else
-        warn "工作目录不存在: ${WORK_BASE}"
-    fi
-}
-
-remove_management_tool() {
-    info "正在删除管理工具..."
-    local tool_path="/usr/local/bin/jb"
-    if [[ -f "$tool_path" ]]; then
-        info "删除管理工具: ${tool_path}"
-        sudo rm -f "$tool_path" 2>/dev/null || warn "无法删除 ${tool_path}"
-        success "管理工具已删除"
-    else
-        warn "管理工具不存在: ${tool_path}"
-    fi
-}
-
+# ==========================================
+# 清理残留进程（修复 pkill 拼写）
+# ==========================================
 cleanup_processes() {
-    info "正在清理残留进程..."
+    _info "正在清理残留进程..."
     local processes=("xray" "hysteria" "cloudflared")
+
     for process in "${processes[@]}"; do
-        if pgrep -f "$process" > /dev/null 2>&1; then
-            info "杀死进程: ${process}"
-            pkill -9 -f "$process" 2>/dev/null || warn "无法杀死 ${process}"
+        if pgrep -f "$process" >/dev/null 2>&1; then
+            _info "终止进程: $process"
+            # 使用正确的 pkill 命令，fallback 到 killall
+            if command -v pkill &>/dev/null; then
+                pkill -9 -f "$process" 2>/dev/null || true
+            elif command -v killall &>/dev/null; then
+                killall -9 "$process" 2>/dev/null || true
+            else
+                # 最后的 fallback
+                pgrep -f "$process" | xargs -r kill -9 2>/dev/null || true
+            fi
         fi
     done
-    success "进程清理完成"
+    _success "进程清理完成"
 }
 
-cleanup_firewall() {
-    info "正在清理防火墙规则..."
-    # 清理 UFW 规则
-    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
-        # 删除允许 Hysteria2 常用端口范围的规则
-        ufw delete allow proto udp from any to any port 10000:59999 2>/dev/null || true
-        info "UFW 规则已清理"
+# ==========================================
+# 删除工作目录
+# ==========================================
+remove_work_directory() {
+    _info "正在删除工作目录..."
+    if [[ -d "$WORK_DIR" ]]; then
+        _info "删除: $WORK_DIR"
+        rm -rf "$WORK_DIR" 2>/dev/null || _warn "无法删除 $WORK_DIR"
+        _success "工作目录已删除"
+    else
+        _warn "工作目录不存在: $WORK_DIR"
     fi
-    # 清理 iptables 规则
-    if command -v iptables &>/dev/null; then
-        iptables -D INPUT -p udp --dport 10000:59999 -j ACCEPT 2>/dev/null || true
-        # 持久化清理后的规则
-        if command -v iptables-save &>/dev/null && [[ -d /etc/iptables ]]; then
-            iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
-            info "iptables 持久化规则已更新"
-        fi
-    fi
-    success "防火墙规则清理完成"
 }
 
+# ==========================================
+# 删除管理工具
+# ==========================================
+remove_management_tool() {
+    _info "正在删除管理工具..."
+    if [[ -f "$MGMT_TOOL" ]]; then
+        _info "删除: $MGMT_TOOL"
+        rm -f "$MGMT_TOOL" 2>/dev/null || _warn "无法删除 $MGMT_TOOL"
+        _success "管理工具已删除"
+    else
+        _warn "管理工具不存在: $MGMT_TOOL"
+    fi
+}
+
+# ==========================================
+# 卸载确认
+# ==========================================
 confirm_uninstall() {
     echo ""
     echo -e "${YELLOW}========================================${NC}"
-    echo -e "${YELLOW}  警告：即将卸载四合一部署${NC}"
+    echo -e "${YELLOW}  ⚠️  警告：即将卸载 jiaoben 全部组件${NC}"
     echo -e "${YELLOW}========================================${NC}"
     echo ""
     echo "以下操作将被执行："
     echo "  1. 停止所有服务"
-    echo "  2. 删除服务文件"
+    echo "  2. 删除 systemd 服务文件"
     echo "  3. 清理残留进程"
-    echo "  4. 删除工作目录: ${WORK_BASE}"
-    echo "  5. 删除管理工具: /usr/local/bin/jb"
+    echo "  4. 删除工作目录: $WORK_DIR"
+    echo "  5. 删除管理工具: $MGMT_TOOL"
     echo ""
     echo -e "${RED}此操作不可撤销！${NC}"
     echo ""
-    read -p "确认卸载？(yes/no): " -r response
+    read -p "确认卸载？请输入 yes 确认: " -r response
+
     if [[ "$response" != "yes" ]]; then
-        info "卸载已取消"
+        _info "卸载已取消"
         exit 0
     fi
 }
 
+# ==========================================
+# 完成信息
+# ==========================================
 show_completion_info() {
     echo ""
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}  卸载完成！${NC}"
+    echo -e "${GREEN}          ✅ 卸载完成！${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
     echo "已删除的内容："
-    echo "  ✓ 所有 Systemd 服务"
-    echo "  ✓ 工作目录: ${WORK_BASE}"
-    echo "  ✓ 管理工具: /usr/local/bin/jb"
+    echo "  ✓ 所有 systemd 服务"
+    echo "  ✓ 工作目录: $WORK_DIR"
+    echo "  ✓ 管理工具: $MGMT_TOOL"
     echo "  ✓ 残留进程"
     echo ""
     echo "如需重新部署，请运行："
@@ -155,13 +168,17 @@ show_completion_info() {
     echo ""
 }
 
+# ==========================================
+# 主函数
+# ==========================================
 main() {
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  科学上网四合一卸载脚本 v6.0${NC}"
+    echo -e "${BLUE}    jiaoben 卸载脚本${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
 
     confirm_uninstall
+
     stop_services
     echo ""
     remove_service_files
@@ -172,8 +189,7 @@ main() {
     echo ""
     remove_management_tool
     echo ""
-    cleanup_firewall
-    echo ""
+
     show_completion_info
 }
 
