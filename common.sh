@@ -1,6 +1,7 @@
 #!/bin/bash
-# jiaoben 项目公共配置文件
+# jiaoben 项目公共配置文件 v6.0
 # 所有脚本都应该通过 source 加载此文件以保证一致性
+# 更新日期: 2026-06-07
 
 # 基础路径配置
 export WORKDIR_BASE="${HOME}/.jiaoben"
@@ -13,7 +14,8 @@ export RED='\033[0;31m'
 export GREEN='\033[0;32m'
 export YELLOW='\033[1;33m'
 export BLUE='\033[0;34m'
-export NC='\033[0m' # No Color
+export CYAN='\033[0;36m'
+export NC='\033[0m'
 
 # 日志函数
 log_info() {
@@ -33,7 +35,7 @@ secure_file() {
     local file="$1"
     if [ -f "$file" ]; then
         chmod 600 "$file"
-        log_info "设置文件 $file 权限为 600"
+        log_info "设置文件 ${file} 权限为 600"
     fi
 }
 
@@ -45,9 +47,9 @@ check_sudo() {
     fi
 }
 
-# 安全的随机数生成
+# 安全的随机数生成（使用 openssl 替代 /dev/urandom）
 generate_uuid() {
-    cat /dev/urandom | tr -dc 'a-f0-9' | fold -w 32 | head -n 1
+    openssl rand -hex 16
 }
 
 # 创建必要的目录
@@ -69,12 +71,13 @@ add_node_info() {
     local protocol="$1"
     local link="$2"
     local name="${3:-$(date +%s)}"
-    
-    local temp_file=$(mktemp)
+
+    local temp_file
+    temp_file=$(mktemp)
     jq --arg proto "$protocol" --arg link "$link" --arg name "$name" \
         '. += [{protocol: $proto, link: $link, name: $name, timestamp: now}]' \
         "$INFO_FILE" > "$temp_file"
-    
+
     mv "$temp_file" "$INFO_FILE"
     secure_file "$INFO_FILE"
 }
@@ -89,12 +92,12 @@ get_all_nodes() {
 # 错误处理函数
 handle_error() {
     local line_no=$1
-    log_error "脚本在第 $line_no 行出错"
+    log_error "脚本在第 ${line_no} 行出错"
     exit 1
 }
 
-# 设置错误陷阱
+# 设置错误陷阱（带 ERRTRACE 支持）
 set_error_trap() {
+    set -E
     trap 'handle_error ${LINENO}' ERR
 }
-

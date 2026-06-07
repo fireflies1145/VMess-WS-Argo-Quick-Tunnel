@@ -14,6 +14,11 @@
 - **下载重试** - 网络不稳定时自动重试
 - **多架构支持** - x86_64 (amd64)、ARM64 (aarch64)
 - **多发行版** - Ubuntu / Debian / CentOS / RHEL
+- **健康检查** - 部署后自动验证服务状态
+- **防火墙持久化** - iptables 规则自动持久化
+- **日志轮转** - Argo 日志自动轮转，防止磁盘占满
+- **多源 IP 检测** - 5 个 IP 源自动 fallback
+- **JSON 配置安全构建** - jq 验证，防止配置损坏
 
 ## 🚀 快速开始
 
@@ -39,8 +44,9 @@ sudo bash jiaoben-simplified.sh
 3. 部署 Hysteria2           # 基于 QUIC，低延迟
 4. 一键部署全部
 5. 查看节点信息
-6. 停止/重启服务
-7. 彻底卸载（有确认提示）
+6. 重启服务
+7. 更新组件
+8. 彻底卸载（有确认提示）
 ```
 
 ### 参数支持
@@ -104,14 +110,16 @@ journalctl -u jiaoben-xray -n 50
 - 下载组件 SHA256 完整性校验
 - 配置覆盖前自动备份
 - 部署前端口占用检测
-- 安全的随机密钥生成（openssl rand + /proc/sys/kernel/random/uuid）
+- 安全的随机密钥生成（openssl rand）
+- JSON 配置有效性验证（jq 校验）
+- iptables 防火墙规则自动持久化
 
 ## 🗑️ 卸载
 
 **方式一：脚本菜单（推荐）**
 ```bash
 sudo bash jiaoben-simplified.sh
-# 选择 7 → 确认 y
+# 选择 8 → 确认 y
 ```
 
 **方式二：独立卸载脚本**
@@ -119,7 +127,7 @@ sudo bash jiaoben-simplified.sh
 bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/uninstall.sh)
 ```
 
-卸载会自动：停止所有服务 → 删除 systemd 文件 → 删除工作目录 → 清理残留进程
+卸载会自动：停止所有服务 → 删除 systemd 文件 → 清理进程 → 删除工作目录 → 清理防火墙
 
 ## 🐛 故障排除
 
@@ -149,4 +157,4 @@ MIT License - 详见 [LICENSE](LICENSE)
 
 ---
 
-**当前版本**: v5.0 (2026-06-06)
+**当前版本**: v6.0 (2026-06-07)

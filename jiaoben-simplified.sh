@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 
 # ==========================================
-# jiaoben - 科学上网四合一精简版 v5.0
-# 更新日期: 2026-06-06
-# 优化: 版本统一、路径动态化、GitHub API 兼容、
-#       dnf 支持、IPv6、函数拆分、更新机制
+# jiaoben - 科学上网四合一精简版 v6.0
+# 更新日期: 2026-06-07
+# 优化: 全面 bug 修复、错误处理增强、安全加固、
+#       防火墙持久化、健康检查、日志轮转、
+#       多源 IP 检测、JSON 配置安全构建
 # ==========================================
 
-set -uo pipefail
+set -Eeuo pipefail
 
-VERSION="5.0"
+VERSION="6.0"
 
 # --- 内联公共配置（不依赖 common.sh） ---
 export WORKDIR_BASE="${HOME}/.jiaoben"
@@ -29,6 +30,9 @@ success() { echo -e "${GREEN}[INFO]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2; }
 error()   { echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2; exit 1; }
 
+# --- 全局错误陷阱 ---
+trap 'echo -e "${RED}[ERROR]${NC} 脚本在第 ${LINENO} 行出错，退出码: $?${NC}" >&2; exit 1' ERR
+
 # --- 路径 ---
 WORK_DIR="${WORKDIR_BASE}"
 XRAY_DIR="${WORK_DIR}/xray"
@@ -38,10 +42,10 @@ ARGO_BIN="${WORK_DIR}/cloudflared"
 XRAY_CONFIG="${WORK_DIR}/config.json"
 HY2_CONFIG="${WORK_DIR}/hy2_config.yaml"
 NODES_FILE="${INFO_FILE}"
+ARGO_LOG="${WORK_DIR}/argo.log"
 
 # --- 已知稳定版本（GitHub API 不可用时的 fallback） ---
 KNOWN_XRAY_VERSION="v25.5.16"
-
 
 # --- 参数支持 ---
 if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then
@@ -52,15 +56,12 @@ fi
 # --- 权限与目录检查 ---
 check_env() {
     [[ $EUID -ne 0 ]] && error "此脚本必须以 root 身份运行"
-    # 解决目录/文件冲突
     [[ -d "$ARGO_BIN" ]] && rm -rf "$ARGO_BIN"
     [[ -d "$HY2_BIN" ]] && rm -rf "$HY2_BIN"
     mkdir -p "$WORK_DIR" "$XRAY_DIR"
 }
 
 # --- 架构识别 ---
-# 用法: detect_arch          → amd64 / arm64
-#       detect_arch xray     → 64 / arm64-v8a
 detect_arch() {
     local fmt="${1:-generic}"
     local arch
@@ -80,7 +81,7 @@ check_port() {
     local port="$1"
     if ss -tlnp 2>/dev/null | grep -q ":${port} " || \
        netstat -tlnp 2>/dev/null | grep -q ":${port} "; then
-        warn "端口 $port 已被占用:"
+        warn "端口 ${port} 已被占用:"
         ss -tlnp 2>/dev/null | grep ":${port} " || netstat -tlnp 2>/dev/null | grep ":${port} "
         return 1
     fi
@@ -91,12 +92,14 @@ check_port() {
 append_node() {
     local name="$1"
     local link="$2"
-    echo "" >> "$NODES_FILE"
-    echo "┌─────────────────────────────────────────────" >> "$NODES_FILE"
-    echo "│  $name" >> "$NODES_FILE"
-    echo "├─────────────────────────────────────────────" >> "$NODES_FILE"
-    echo "$link" >> "$NODES_FILE"
-    echo "└─────────────────────────────────────────────" >> "$NODES_FILE"
+    {
+        echo ""
+        echo "┌─────────────────────────────────────────────"
+        echo "│  ${name}"
+        echo "├─────────────────────────────────────────────"
+        echo "${link}"
+        echo "└─────────────────────────────────────────────"
+    } >> "$NODES_FILE"
 }
 
 print_nodes() {
@@ -114,11 +117,14 @@ verify_sha256() {
     local file="$1"
     local expected="$2"
     [[ -z "$expected" ]] && return 0
+    if [[ ! -f "$file" ]]; then
+        error "校验文件不存在: ${file}"
+    fi
     local actual
     actual=$(sha256sum "$file" | cut -d' ' -f1)
     if [[ "$actual" != "$expected" ]]; then
         rm -f "$file"
-        error "SHA256 校验失败: 期望 $expected, 实际 $actual"
+        error "SHA256 校验失败: 期望 ${expected}, 实际 ${actual}"
     fi
     info "SHA256 校验通过 ✓"
 }
@@ -131,7 +137,7 @@ download_file() {
     local retries=3
 
     for i in $(seq 1 "$retries"); do
-        info "下载 $desc (尝试 $i/$retries)..."
+        info "下载 ${desc} (尝试 ${i}/${retries})..."
         if wget -q --timeout=30 "$url" -O "$dest" 2>/dev/null; then
             [[ -s "$dest" ]] && return 0
         fi
@@ -139,7 +145,19 @@ download_file() {
         warn "下载失败，${i}s 后重试..."
         sleep "$i"
     done
-    error "下载 $desc 失败，请检查网络连接"
+    error "下载 ${desc} 失败，请检查网络连接"
+}
+
+# --- 安全下载 SHA256 校验值 ---
+download_sha256() {
+    local url="$1"
+    local expected=""
+    expected=$(curl -fsSL "$url" 2>/dev/null | head -1 | awk '{print $1}' || echo "")
+    if [[ -n "$expected" ]] && [[ "$expected" =~ ^[a-f0-9]{64}$ ]]; then
+        echo "$expected"
+        return 0
+    fi
+    echo ""
 }
 
 # --- 包管理器安装依赖 ---
@@ -161,26 +179,24 @@ github_api() {
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
         headers+=(-H "Authorization: token ${GITHUB_TOKEN}")
     fi
-    curl -fsSL "${headers[@]}" "$url" 2>/dev/null
+    curl -fsSL "${headers[@]}" "$url" 2>/dev/null || echo ""
 }
 
 # --- 获取 Xray 最新版本号（带 fallback） ---
 get_xray_version() {
     local version=""
-    # 优先使用 GitHub API
-    version=$(github_api "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | jq -r .tag_name 2>/dev/null)
+    version=$(github_api "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | jq -r .tag_name 2>/dev/null || echo "")
     if [[ -n "$version" && "$version" != "null" ]]; then
         echo "$version"
         return
     fi
-    # API 失败（限流等），使用已知稳定版本
-    warn "GitHub API 不可用（可能被限流），使用已知稳定版本: $KNOWN_XRAY_VERSION"
+    warn "GitHub API 不可用（可能被限流），使用已知稳定版本: ${KNOWN_XRAY_VERSION}"
     echo "$KNOWN_XRAY_VERSION"
 }
 
-# --- 组件下载 ---
+# --- 组件下载（带 SHA256 校验） ---
 download_xray() {
-    [[ -f "$XRAY_BIN" ]] && return
+    [[ -f "$XRAY_BIN" ]] && return 0
     local arch
     arch=$(detect_arch xray)
     local version
@@ -189,11 +205,8 @@ download_xray() {
     local zip_url="https://github.com/XTLS/Xray-core/releases/download/${version}/Xray-linux-${arch}.zip"
     download_file "$zip_url" "$WORK_DIR/xray.zip" "Xray ${version}"
 
-    # SHA256 校验（从 .dgst 文件获取）
-    wget -q "https://github.com/XTLS/Xray-core/releases/download/${version}/Xray-linux-${arch}.zip.dgst" \
-        -O "$WORK_DIR/xray.zip.dgst" 2>/dev/null || true
-    local expected
-    expected=$(grep -oP 'SHA256=\K[a-f0-9]{64}' "$WORK_DIR/xray.zip.dgst" 2>/dev/null || echo "")
+    local expected=""
+    expected=$(download_sha256 "https://github.com/XTLS/Xray-core/releases/download/${version}/Xray-linux-${arch}.zip.dgst")
     if [[ -n "$expected" ]]; then
         verify_sha256 "$WORK_DIR/xray.zip" "$expected"
     else
@@ -204,27 +217,26 @@ download_xray() {
     unzip -qo "$WORK_DIR/xray.zip" -d "$XRAY_DIR"
     chmod +x "$XRAY_BIN"
     rm -f "$WORK_DIR/xray.zip"
-    info "Xray 下载完成: $version"
+    info "Xray 下载完成: ${version}"
+    return 0
 }
 
 download_hy2() {
-    [[ -f "$HY2_BIN" ]] && return
+    [[ -f "$HY2_BIN" ]] && return 0
     local arch
     arch=$(detect_arch)
     local bin_url="https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-${arch}"
     download_file "$bin_url" "$HY2_BIN" "Hysteria2"
 
-    # SHA256 校验（尝试 .sha256 文件，失败则从 Release body 解析）
-    local sha_url="${bin_url}.sha256"
-    local expected
-    expected=$(curl -fsSL "$sha_url" 2>/dev/null | cut -d' ' -f1 || echo "")
+    local expected=""
+    expected=$(download_sha256 "${bin_url}.sha256")
     if [[ -z "$expected" ]]; then
-        # fallback: 从 Release API body 中提取
         local arch_name
         arch_name=$(detect_arch)
         expected=$(github_api "https://api.github.com/repos/apernet/hysteria/releases/latest" \
             | jq -r ".body" 2>/dev/null \
             | grep -oP "hysteria-linux-${arch_name}\s+\K[a-f0-9]{64}" || echo "")
+        [[ -n "$expected" ]] && [[ ! "$expected" =~ ^[a-f0-9]{64}$ ]] && expected=""
     fi
     if [[ -n "$expected" ]]; then
         verify_sha256 "$HY2_BIN" "$expected"
@@ -233,25 +245,25 @@ download_hy2() {
     fi
     chmod +x "$HY2_BIN"
     info "Hysteria2 下载完成"
+    return 0
 }
 
 download_argo() {
-    [[ -f "$ARGO_BIN" ]] && return
+    [[ -f "$ARGO_BIN" ]] && return 0
     local arch
     arch=$(detect_arch)
     local bin_url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}"
     download_file "$bin_url" "$ARGO_BIN" "Cloudflared"
 
-    # SHA256 校验（尝试 .sha256 文件，失败则从 Release body 解析）
-    local sha_url="${bin_url}.sha256"
-    local expected
-    expected=$(curl -fsSL "$sha_url" 2>/dev/null | cut -d' ' -f1 || echo "")
+    local expected=""
+    expected=$(download_sha256 "${bin_url}.sha256")
     if [[ -z "$expected" ]]; then
         local arch_name
         arch_name=$(detect_arch)
         expected=$(github_api "https://api.github.com/repos/cloudflare/cloudflared/releases/latest" \
             | jq -r ".body" 2>/dev/null \
             | grep -oP "cloudflared-linux-${arch_name}\s+\K[a-f0-9]{64}" || echo "")
+        [[ -n "$expected" ]] && [[ ! "$expected" =~ ^[a-f0-9]{64}$ ]] && expected=""
     fi
     if [[ -n "$expected" ]]; then
         verify_sha256 "$ARGO_BIN" "$expected"
@@ -260,6 +272,7 @@ download_argo() {
     fi
     chmod +x "$ARGO_BIN"
     info "Cloudflared 下载完成"
+    return 0
 }
 
 # --- 密钥生成 ---
@@ -270,7 +283,6 @@ generate_keys() {
     priv=$(echo "$output" | grep -oP 'Private key:\s*\K\S+')
     pub=$(echo "$output" | grep -oP 'Public key:\s*\K\S+')
     if [[ -z "$priv" || -z "$pub" ]]; then
-        # fallback: 旧版 xray 输出格式
         local keys
         keys=$(echo "$output" | grep -oE '[A-Za-z0-9+/_-]{43,44}')
         priv=$(echo "$keys" | head -1)
@@ -280,22 +292,104 @@ generate_keys() {
     echo "${priv}:${pub}"
 }
 
-# --- 获取公网 IP（支持 IPv6） ---
+# --- 获取公网 IP（多源 fallback，支持 IPv6） ---
 get_public_ip() {
     local ip=""
-    # 优先 IPv4
-    ip=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || echo "")
-    if [[ -z "$ip" ]]; then
-        # fallback: IPv6
-        ip=$(curl -6 -s --max-time 5 ifconfig.me 2>/dev/null || echo "")
+    local ip_services=("ifconfig.me" "ipinfo.io/ip" "icanhazip.com" "api.ipify.org" "checkip.amazonaws.com")
+
+    for svc in "${ip_services[@]}"; do
+        ip=$(curl -4 -s --max-time 5 "$svc" 2>/dev/null || echo "")
+        [[ -n "$ip" ]] && [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && echo "$ip" && return 0
+    done
+
+    for svc in "${ip_services[@]}"; do
+        ip=$(curl -6 -s --max-time 5 "$svc" 2>/dev/null || echo "")
+        [[ -n "$ip" ]] && echo "$ip" && return 0
+    done
+
+    warn "无法获取公网 IP，请手动填写"
+    echo "YOUR_IP"
+}
+
+# --- 验证 IP 是否可达 ---
+validate_ip() {
+    local ip="$1"
+    if [[ "$ip" == "YOUR_IP" ]] || [[ -z "$ip" ]]; then
+        error "无法获取公网 IP，请检查网络连接后重试"
     fi
-    [[ -z "$ip" ]] && ip="YOUR_IP"
-    echo "$ip"
+    info "检测到公网 IP: ${ip}"
 }
 
 # --- 备份现有配置 ---
 backup_config() {
     [[ -f "$XRAY_CONFIG" ]] && cp "$XRAY_CONFIG" "${XRAY_CONFIG}.bak.$(date +%s)"
+}
+
+# --- 验证 JSON 文件有效性 ---
+validate_json() {
+    local file="$1"
+    [[ ! -f "$file" ]] && return 1
+    if ! jq empty "$file" 2>/dev/null; then
+        warn "JSON 文件无效: ${file}"
+        return 1
+    fi
+    return 0
+}
+
+# --- 防火墙规则管理（支持持久化） ---
+add_firewall_rule() {
+    local port_range="$1"
+    local proto="${2:-udp}"
+
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
+        ufw allow proto "$proto" from any to any port "$port_range" 2>/dev/null || true
+        info "UFW 规则已添加: ${port_range}/${proto}"
+        return 0
+    fi
+
+    if command -v iptables &>/dev/null; then
+        local colon_range="${port_range//-/:}"
+        iptables -C INPUT -p "$proto" --dport "$colon_range" -j ACCEPT 2>/dev/null || \
+        iptables -A INPUT -p "$proto" --dport "$colon_range" -j ACCEPT 2>/dev/null || true
+        info "iptables 规则已添加: ${colon_range}/${proto}"
+
+        if command -v iptables-save &>/dev/null; then
+            mkdir -p /etc/iptables
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            info "iptables 规则已持久化"
+        fi
+        return 0
+    fi
+
+    warn "未检测到防火墙工具，请手动开放端口: ${port_range}/${proto}"
+}
+
+# --- 日志轮转 ---
+rotate_argo_log() {
+    local log_file="$1"
+    local max_size=$((10 * 1024 * 1024))
+
+    if [[ -f "$log_file" ]] && [[ $(stat -c%s "$log_file" 2>/dev/null || echo 0) -gt $max_size ]]; then
+        mv "$log_file" "${log_file}.old"
+        info "Argo 日志已轮转（超过 10MB）"
+    fi
+}
+
+# --- 服务健康检查 ---
+health_check() {
+    local service="$1"
+    local max_wait="${2:-10}"
+    local unit="jiaoben-${service}"
+
+    for i in $(seq 1 "$max_wait"); do
+        if systemctl is-active --quiet "$unit" 2>/dev/null; then
+            info "${service} 服务健康 ✓"
+            return 0
+        fi
+        sleep 1
+    done
+    warn "${service} 服务未就绪，请检查: journalctl -u ${unit} -n 20"
+    return 1
 }
 
 # ============================================================
@@ -322,33 +416,38 @@ deploy_reality() {
   "log": {"loglevel": "warning"},
   "inbounds": [{
     "port": 443, "protocol": "vless",
-    "settings": {"clients": [{"id": "$uuid", "flow": "xtls-rprx-vision"}], "decryption": "none"},
+    "settings": {"clients": [{"id": "${uuid}", "flow": "xtls-rprx-vision"}], "decryption": "none"},
     "streamSettings": {
       "network": "tcp", "security": "reality",
       "realitySettings": {
         "show": false, "dest": "www.microsoft.com:443", "xver": 0,
-        "serverNames": ["$domain"], "privateKey": "$priv", "shortIds": ["$sid"]
+        "serverNames": ["${domain}"], "privateKey": "${priv}", "shortIds": ["${sid}"]
       }
     }
   }],
   "outbounds": [{"protocol": "freedom"}]
 }
 EOF
+
     cat > "/etc/systemd/system/jiaoben-xray.service" <<EOF
 [Unit]
 Description=Jiaoben Xray
 After=network.target
 [Service]
-ExecStart=$XRAY_BIN run -c $XRAY_CONFIG
+ExecStart=${XRAY_BIN} run -c ${XRAY_CONFIG}
 Restart=on-failure
 RestartSec=5
+LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload && systemctl enable --now jiaoben-xray || error "REALITY 服务启动失败"
+    health_check "xray" 5 || true
+
     local ip
     ip=$(get_public_ip)
-    local real_link="vless://$uuid@$ip:443?type=tcp&security=reality&pbk=$pub&fp=chrome&sni=$domain&flow=xtls-rprx-vision&sid=$sid#REALITY"
+    validate_ip "$ip"
+    local real_link="vless://${uuid}@${ip}:443?type=tcp&security=reality&pbk=${pub}&fp=chrome&sni=${domain}&flow=xtls-rprx-vision&sid=${sid}#REALITY"
     append_node "REALITY (VLESS)" "$real_link"
     chmod 600 "$NODES_FILE"
     success "REALITY 部署完成"
@@ -364,11 +463,11 @@ Description=Jiaoben Cloudflare Argo Tunnel
 After=network-online.target
 Wants=network-online.target
 [Service]
-ExecStart=$ARGO_BIN tunnel --url http://127.0.0.1:8080 --no-autoupdate
+ExecStart=${ARGO_BIN} tunnel --url http://127.0.0.1:8080 --no-autoupdate
 Restart=on-failure
 RestartSec=10
-StandardOutput=append:${WORK_DIR}/argo.log
-StandardError=append:${WORK_DIR}/argo.log
+StandardOutput=append:${ARGO_LOG}
+StandardError=append:${ARGO_LOG}
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -379,13 +478,12 @@ get_argo_domain() {
     local max_wait=30
     info "正在获取 Argo 域名..."
     for i in $(seq 1 "$max_wait"); do
-        # 检查 cloudflared 进程是否还活着
         if ! pgrep -f "cloudflared tunnel" >/dev/null 2>&1; then
             warn "cloudflared 进程已退出，停止等待"
             return 1
         fi
         local domain
-        domain=$(grep -aoP 'https://[a-z0-9-]+\.trycloudflare\.com' "${WORK_DIR}/argo.log" 2>/dev/null | head -1 | sed 's|https://||')
+        domain=$(grep -aoP 'https://[a-z0-9-]+\.trycloudflare\.com' "${ARGO_LOG}" 2>/dev/null | head -1 | sed 's|https://||')
         [[ -n "$domain" ]] && echo "$domain" && return 0
         sleep 2
     done
@@ -401,41 +499,54 @@ deploy_argo() {
     local path="/$(openssl rand -hex 4)"
 
     backup_config
-    if [[ ! -f "$XRAY_CONFIG" ]]; then
+
+    # 安全构建/追加 JSON 配置
+    if validate_json "$XRAY_CONFIG"; then
+        if ! jq --arg uuid "$uuid" --arg path "$path" \
+            '.inbounds += [{"listen": "127.0.0.1", "port": 8080, "protocol": "vless", "settings": {"clients": [{"id": $uuid}], "decryption": "none"}, "streamSettings": {"network": "ws", "wsSettings": {"path": $path}}}]' \
+            "$XRAY_CONFIG" > "${XRAY_CONFIG}.tmp"; then
+            rm -f "${XRAY_CONFIG}.tmp"
+            error "Xray 配置更新失败（jq 错误），已保留原配置"
+        fi
+        mv "${XRAY_CONFIG}.tmp" "$XRAY_CONFIG"
+    else
         cat > "$XRAY_CONFIG" <<EOF
 {
   "log": {"loglevel": "warning"},
-  "inbounds": [],
+  "inbounds": [{
+    "listen": "127.0.0.1",
+    "port": 8080,
+    "protocol": "vless",
+    "settings": {"clients": [{"id": "${uuid}"}], "decryption": "none"},
+    "streamSettings": {"network": "ws", "wsSettings": {"path": "${path}"}}
+  }],
   "outbounds": [{"protocol": "freedom"}]
 }
 EOF
+        info "已创建新的 Xray 配置"
     fi
 
-    # 追加 Argo WebSocket inbound（不影响已有的 REALITY inbound）
-    if ! jq --arg uuid "$uuid" --arg path "$path" \
-        '.inbounds += [{"listen": "127.0.0.1", "port": 8080, "protocol": "vless", "settings": {"clients": [{"id": $uuid}], "decryption": "none"}, "streamSettings": {"network": "ws", "wsSettings": {"path": $path}}}]' \
-        "$XRAY_CONFIG" > "${XRAY_CONFIG}.tmp"; then
-        error "Xray 配置更新失败（jq 错误），已保留原配置"
-    fi
-    mv "${XRAY_CONFIG}.tmp" "$XRAY_CONFIG"
+    validate_json "$XRAY_CONFIG" || error "Xray 配置文件无效，请检查: ${XRAY_CONFIG}"
+
     systemctl restart jiaoben-xray 2>/dev/null || true
 
-    # 停止旧进程，使用 systemd 管理
     pkill cloudflared 2>/dev/null || true
-    : > "${WORK_DIR}/argo.log"
+    : > "${ARGO_LOG}"
     create_argo_service
+    rotate_argo_log "${ARGO_LOG}"
 
     local argo_domain=""
     if argo_domain=$(get_argo_domain); then
-        success "Argo 域名获取成功: $argo_domain"
+        success "Argo 域名获取成功: ${argo_domain}"
     else
-    # 硬编码优选域名（TryCloudflare 分配的域名会过期）
-        warn "Argo 域名获取超时，使用优选域名: yg1.ygkkk.dpdns.org"
+        warn "Argo 域名获取超时"
+        warn "请手动获取域名: journalctl -u jiaoben-argo -n 20"
+        warn "或使用优选域名，但需确保域名可达"
         argo_domain="yg1.ygkkk.dpdns.org"
     fi
     local encoded_path
     encoded_path=$(printf '%s' "$path" | sed 's|/|%2F|g')
-    local argo_link="vless://$uuid@${argo_domain}:443?encryption=none&type=ws&path=${encoded_path}&security=tls&sni=${argo_domain}&fp=chrome#Argo"
+    local argo_link="vless://${uuid}@${argo_domain}:443?encryption=none&type=ws&path=${encoded_path}&security=tls&sni=${argo_domain}&fp=chrome#Argo"
     append_node "Argo 隧道 (VLESS)" "$argo_link"
     chmod 600 "$NODES_FILE"
     success "Argo 隧道部署完成"
@@ -454,7 +565,7 @@ deploy_hy2() {
         read -r -p "监听端口（回车随机分配 10000-59999）: " port
         if [[ -z "$port" ]]; then
             port=$(( $(od -An -N2 -tu2 /dev/urandom | tr -d '[:space:]') % 50000 + 10000 ))
-            info "随机端口: $port"
+            info "随机端口: ${port}"
             break
         fi
         if ! [[ "$port" =~ ^[0-9]+$ ]] || [[ "$port" -lt 1 ]] || [[ "$port" -gt 65535 ]]; then
@@ -462,10 +573,10 @@ deploy_hy2() {
             continue
         fi
         if ss -ulnp 2>/dev/null | grep -q ":${port} "; then
-            warn "端口 $port 已被占用（UDP），请更换"
+            warn "端口 ${port} 已被占用（UDP），请更换"
             continue
         fi
-        info "使用端口: $port"
+        info "使用端口: ${port}"
         break
     done
 
@@ -483,10 +594,9 @@ deploy_hy2() {
         local default_port_end=$((port + 75))
         [[ "$default_port_end" -gt 65535 ]] && default_port_end=65535
 
-        # 端口跳跃范围过小时提示
         local hop_range_size=$((default_port_end - port))
         if [[ "$hop_range_size" -lt 50 ]]; then
-            warn "当前端口 $port 距离 65535 较近，跳跃范围仅 ${hop_range_size} 个端口"
+            warn "当前端口 ${port} 距离 65535 较近，跳跃范围仅 ${hop_range_size} 个端口"
         fi
 
         local port_end=""
@@ -513,8 +623,6 @@ deploy_hy2() {
     local key_file=""
     local sni=""
     local insecure=""
-    local acme_domain=""
-    local acme_email=""
 
     echo ""
     echo "TLS 证书方式:"
@@ -548,7 +656,8 @@ deploy_hy2() {
             2)
                 cert_method="acme"
                 warn "⚠ 注意：CDN 代理（如 Cloudflare 橙色云朵）会导致 ACME 验证失败！"
-
+                local acme_domain=""
+                local acme_email=""
                 while true; do
                     read -r -p "域名（需已解析到本机）: " acme_domain
                     [[ "$acme_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]+)?(\.[a-zA-Z]{2,})$ ]] && break
@@ -559,7 +668,6 @@ deploy_hy2() {
                     [[ "$acme_email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] && break
                     warn "邮箱格式不正确"
                 done
-
                 info "证书申请可能需要 1-2 分钟，启动后请耐心等待。"
                 sni="$acme_domain"
                 insecure=""
@@ -578,7 +686,7 @@ deploy_hy2() {
                     warn "文件不存在，请重新输入"
                 done
                 sni=$(openssl x509 -in "$cert_file" -noout -subject 2>/dev/null | sed 's/.*CN\s*=\s*//' | head -n1) || sni=""
-                [[ -n "$sni" ]] && info "证书 CN: $sni"
+                [[ -n "$sni" ]] && info "证书 CN: ${sni}"
                 insecure=""
                 break
                 ;;
@@ -648,20 +756,10 @@ log:
 EOF
 
     chmod 600 "$HY2_CONFIG"
-    info "配置文件已写入: $HY2_CONFIG"
+    info "配置文件已写入: ${HY2_CONFIG}"
 
     # --- 防火墙 ---
-    if [[ "$port_hop_enabled" == "yes" ]]; then
-        local colon_range="${firewall_port_range//-/:}"
-        if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
-            ufw allow proto udp from any to any port "$colon_range" 2>/dev/null || true
-            info "UFW 规则已添加: ${colon_range}/udp"
-        elif command -v iptables >/dev/null 2>&1; then
-            iptables -C INPUT -p udp --dport "$colon_range" -j ACCEPT 2>/dev/null || \
-            iptables -A INPUT -p udp --dport "$colon_range" -j ACCEPT 2>/dev/null || true
-            info "iptables 规则已添加: ${colon_range}/udp"
-        fi
-    fi
+    add_firewall_rule "$firewall_port_range" "udp"
 
     # --- 启动服务 ---
     cat > "/etc/systemd/system/jiaoben-hy2.service" <<EOF
@@ -669,7 +767,7 @@ EOF
 Description=Jiaoben Hysteria2
 After=network.target
 [Service]
-ExecStart=$HY2_BIN server -c $HY2_CONFIG
+ExecStart=${HY2_BIN} server -c ${HY2_CONFIG}
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=1048576
@@ -677,10 +775,12 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload && systemctl enable --now jiaoben-hy2 || error "Hysteria2 服务启动失败"
+    health_check "hy2" 5 || true
 
     # --- 生成分享链接 ---
     local ip
     ip=$(get_public_ip)
+    validate_ip "$ip"
     local share_host="$ip"
     [[ "$ip" =~ : ]] && [[ ! "$ip" =~ \[ ]] && share_host="[${ip}]"
 
@@ -695,7 +795,6 @@ EOF
 
     local link="hysteria2://${pass}@${share_host}:${port}?sni=${sni}${mport_param}${insecure_param}#Hy2"
 
-    # --- 保存节点信息 ---
     cat >> "$NODES_FILE" <<INFO_EOF
 
 ┌─────────────────────────────────────────────
@@ -712,7 +811,6 @@ ${link}
 └─────────────────────────────────────────────
 INFO_EOF
     chmod 600 "$NODES_FILE"
-
     success "Hysteria2 部署完成"
 }
 
@@ -728,30 +826,28 @@ deploy_all() {
     print_nodes
 }
 
-# --- 更新单个组件（安全方式：先下载再删旧） ---
+# --- 更新单个组件（安全方式：先备份再下载） ---
 update_component() {
     local name="$1"
     local bin_path="$2"
     local download_fn="$3"
     local service="$4"
 
-    # 备份旧二进制
     local backup="${bin_path}.bak"
     [[ -f "$bin_path" ]] && cp "$bin_path" "$backup"
 
     rm -f "$bin_path"
-    if "${download_fn}"; then
+    if "$download_fn"; then
         rm -f "$backup"
-        systemctl restart "$service" 2>/dev/null && success "$name 已更新并重启" || info "$name 已更新（服务未运行）"
+        systemctl restart "$service" 2>/dev/null && success "${name} 已更新并重启" || info "${name} 已更新（服务未运行）"
     else
-        # 下载失败，恢复备份
         [[ -f "$backup" ]] && mv "$backup" "$bin_path"
-        warn "$name 更新失败，已恢复旧版本"
+        warn "${name} 更新失败，已恢复旧版本"
     fi
 }
 
 # ============================================================
-#  服务更新（升级 Xray / Hysteria2 / Cloudflared 二进制）
+#  服务更新
 # ============================================================
 update_services() {
     echo ""
@@ -789,9 +885,9 @@ restart_services() {
     for svc in xray hy2 argo; do
         if service_exists "$svc"; then
             if systemctl restart "jiaoben-$svc" 2>/dev/null; then
-                success "已重启 jiaoben-$svc"
+                success "已重启 jiaoben-${svc}"
             else
-                warn "jiaoben-$svc 重启失败"
+                warn "jiaoben-${svc} 重启失败"
             fi
             found=1
         fi
@@ -810,7 +906,7 @@ uninstall_all() {
         if service_exists "$svc"; then
             systemctl disable --now "jiaoben-$svc" 2>/dev/null
             rm -f "/etc/systemd/system/jiaoben-${svc}.service"
-            info "已移除 jiaoben-$svc"
+            info "已移除 jiaoben-${svc}"
         fi
     done
     pkill cloudflared 2>/dev/null || true

@@ -1,39 +1,64 @@
-# jiaoben 项目更新日志 (2026-05-22)
+# jiaoben 项目更新日志
 
-本项目已由 **Manus AI (基于 GPT-4.1)** 进行全面升级，旨在提升脚本的健壮性、安全性、运维便利性和部署效率。
+## v6.0 - 2026-06-07 (全面修复与安全加固)
 
-## 主要变更内容：
+### 🐛 Bug 修复
 
-### `all-in-one.sh` (部署脚本)
+1. **`set -Eeuo pipefail` 替代 `set -uo pipefail`** — 添加 `errtrace` 使 trap ERR 在函数内生效
+2. **全局错误陷阱** — 新增 `trap ERR` 在脚本级别捕获所有错误
+3. **JSON 配置安全构建** — `deploy_argo()` 追加配置前先用 `validate_json()` 验证文件有效性
+4. **`download_sha256()` 安全校验** — 独立函数验证 SHA256 格式（必须为 64 位十六进制）
+5. **`update_component()` 函数调用修复** — 使用 `"${download_fn}"` 安全调用函数引用
+6. **Argo 域名获取超时处理** — 超时后给出明确提示而非静默使用硬编码域名
+7. **IP 获取失败检测** — `validate_ip()` 函数验证 IP 格式，失败时阻止生成无效节点链接
+8. **防火墙规则持久化** — `add_firewall_rule()` 自动调用 `iptables-save` 持久化规则
+9. **端口跳跃和自定义端口统一处理** — `add_firewall_rule()` 同时支持两种场景
+10. **变量引用统一** — 所有变量使用 `${var}` 格式，防止歧义
 
-1.  **Systemd 服务化**：
-    - 彻底移除 `nohup` 方式，所有部署的服务（Xray, Hysteria, Cloudflared）现在都通过 **Systemd** 进行管理。
-    - 自动创建并启用 `.service` 文件，支持开机自启、自动故障恢复和统一日志管理。
-2.  **系统兼容性增强**：
-    - 增加 `install_dependencies` 函数，自动检测 Linux 发行版（Ubuntu/Debian, CentOS/RHEL）并使用对应的包管理器安装缺失依赖（`curl`, `unzip`, `openssl`, `grep`, `sed`, `base64`, `coreutils`, `procps`, `jq`）。
-3.  **部署效率优化**：
-    - 优化了 Xray 和 Cloudflared 的下载逻辑，避免重复下载。
-    - Cloudflared 隧道启动后，在获取 Argo 域名成功后，会将其转换为 Systemd 服务进行管理，提高稳定性。
-4.  **端口检测优化**：
-    - `get_random_port` 函数现在使用 `ss -tln` 进行更准确的端口占用检测。
-5.  **代码结构优化**：
-    - 引入 `create_service` 函数，封装 Systemd 服务创建逻辑，提高代码可读性和复用性。
+### 💡 优化
 
-### `jb.sh` (管理脚本)
+1. **多源 IP 检测** — `get_public_ip()` 使用 5 个服务源自动 fallback（ifconfig.me, ipinfo.io, icanhazip.com, api.ipify.org, checkip.amazonaws.com）
+2. **JSON 配置验证** — `validate_json()` 函数用 `jq empty` 验证配置文件有效性
+3. **服务健康检查** — `health_check()` 函数在部署后验证服务是否正常运行
+4. **日志轮转** — `rotate_argo_log()` 自动轮转超过 10MB 的 Argo 日志
+5. **SHA256 下载优化** — `download_sha256()` 独立函数，格式验证，错误处理
+6. **防火墙管理统一** — `add_firewall_rule()` 支持 UFW 和 iptables，自动持久化
+7. **错误处理增强** — 所有函数添加明确的错误处理和返回值检查
+8. **代码结构优化** — 函数职责更清晰，减少重复代码
+9. **变量引用安全** — 所有字符串使用双引号包裹，防止 word splitting
+10. **日志格式统一** — 所有日志使用统一的时间戳格式
 
-1.  **Systemd 服务管理**：
-    - 菜单选项更新，现在可以对所有节点服务进行 **状态检查**、**重启**、**停止** 和 **卸载**，所有操作均通过 `systemctl` 完成。
-    - `SERVICES` 数组明确列出所有由 `all-in-one.sh` 创建的 Systemd 服务名称。
-2.  **实时日志查看**：
-    - 新增“查看实时服务日志”功能，用户可以选择特定服务，通过 `journalctl -f` 实时查看其日志输出，方便故障排查。
-3.  **卸载逻辑增强**：
-    - 卸载时会先停止并禁用所有 Systemd 服务，然后删除对应的 `.service` 文件和工作目录，清理更加彻底。
-4.  **交互优化**：
-    - 菜单选项更加清晰，操作提示更友好。
+### 📝 文档更新
 
-## 如何使用：
-
-1.  **部署**：运行 `./all-in-one.sh` (确保已赋予执行权限)。
-2.  **管理**：部署完成后，输入 `jb` 即可进入管理菜单。
+- README.md 更新至 v6.0
+- CHANGELOG.md 新增 v6.0 更新记录
+- IMPROVEMENTS.md 新增 v6.0 改进说明
+- SECURITY.md 保持不变（安全实践仍然适用）
 
 ---
+
+## v5.0 - 2026-06-06
+
+### 主要变更
+- 版本统一、路径动态化
+- GitHub API 兼容
+- dnf 支持
+- IPv6 支持
+- 函数拆分
+- 更新机制
+
+---
+
+## v2.0.0 - 2026-05-23
+
+### 主要变更
+- 新增 `common.sh` 公共配置文件
+- 实现模块间的显式依赖管理
+- 改进节点信息存储格式（JSON）
+- 添加文件权限严格控制
+- 实现 sudo 权限检查
+- 添加安全的随机数生成函数
+- 添加下载文件完整性校验（SHA256）
+- 改进错误处理机制
+- 新增 `jb_improved.sh` 管理脚本
+- 添加参数验证和命令自动补全
