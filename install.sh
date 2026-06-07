@@ -6,7 +6,7 @@
 # ==========================================
 set -Euo pipefail
 
-VERSION="4.3"
+VERSION="4.4"
 
 # --- 加载公共库 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,8 +49,9 @@ fi
 _error_trap_fired=0
 _error_trap_handler() {
     # 防止 trap 连锁触发
-    [[ $_error_trap_fired -eq 1 ]] && exit 1
+    [[ $_error_trap_fired -eq 1 ]] && return
     _error_trap_fired=1
+    trap - ERR
     _log_error "脚本在第 ${1:-?} 行出错，正在退出..."
     exit 1
 }
@@ -305,13 +306,15 @@ generate_keys() {
     }
 
     # 解析密钥（兼容新旧格式）
-    priv=$(echo "$output" | grep -oP 'Private key:\s*\K[^\s]+' || true)
-    pub=$(echo "$output" | grep -oP 'Public key:\s*\K[^\s]+' || true)
+    # Xray >= 25.x: "PrivateKey:" / "Password (PublicKey):"
+    # Xray 旧版:     "Private key:" / "Public key:"
+    priv=$(echo "$output" | grep -oP 'Private\s*[Kk]ey:\s*\K[^\s]+' || true)
+    pub=$(echo "$output" | grep -oP '(?:Public\s*[Kk]ey|Password\s*\(PublicKey\)):\s*\K[^\s]+' || true)
 
-    # fallback: 找所有 43 字符的 base64 串（X25519 标准长度）
+    # fallback: 找所有 base64url 串（X25519 密钥含 _ - 字符）
     if [[ -z "$priv" || -z "$pub" ]]; then
         local keys
-        keys=$(echo "$output" | grep -oE '[A-Za-z0-9+/]{43}' | head -2)
+        keys=$(echo "$output" | grep -oE '[A-Za-z0-9_\-+/]{43,}' | head -2)
         priv=$(echo "$keys" | head -1)
         pub=$(echo "$keys" | head -2 | tail -1)
     fi
