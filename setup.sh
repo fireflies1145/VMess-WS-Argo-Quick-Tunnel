@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ==========================================
-# jiaoben - 代理节点一键部署系统 v4.5
+# jiaoben - 代理节点一键部署系统 v4.6
 # 更新日期: 2026-06-07
 # 修复: xray 二进制有效性校验、错误陷阱连锁、set -u 兼容
 # ==========================================
 set -Euo pipefail
 
-VERSION="4.5"
+VERSION="4.6"
 
 # --- 加载公共库 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -360,7 +360,7 @@ gen_hex() {
 # ==========================================
 # 节点信息管理
 # ==========================================
-_init_nodes_file() { [[ ! -f "$NODES_FILE" ]] && echo "# jiaoben 节点信息" > "$NODES_FILE"; }
+_init_nodes_file() { [[ ! -f "$NODES_FILE" ]] && echo "# jiaoben 节点信息" > "$NODES_FILE" || true; }
 
 append_node() {
     local name="$1" link="$2"
@@ -570,7 +570,9 @@ listen: ${listen_addr}
 tls:
 $(echo -e "$tls_block")
 
-auth: ${pass}
+auth:
+  type: password
+  password: ${pass}
 
 $(echo -e "$bw_block")
 
@@ -661,7 +663,7 @@ get_argo_domain() {
 # 备份配置
 # ==========================================
 backup_config() {
-    [[ -f "$XRAY_CONFIG" ]] && cp "$XRAY_CONFIG" "${XRAY_CONFIG}.bak.$(date +%s)"
+    [[ -f "$XRAY_CONFIG" ]] && cp "$XRAY_CONFIG" "${XRAY_CONFIG}.bak.$(date +%s)" || true
 }
 
 # ==========================================
@@ -987,6 +989,6 @@ check_env
 while true; do
     main_menu
     echo ""
-    read -n 1 -s -r -p "按任意键返回主菜单..."
+    read -n 1 -s -r -p "按任意键返回主菜单..." || true
     echo ""
 done
