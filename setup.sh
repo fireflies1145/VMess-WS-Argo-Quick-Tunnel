@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ==========================================
-# jiaoben - 代理节点一键部署系统 v4.3
+# jiaoben - 代理节点一键部署系统 v4.5
 # 更新日期: 2026-06-07
 # 修复: xray 二进制有效性校验、错误陷阱连锁、set -u 兼容
 # ==========================================
 set -Euo pipefail
 
-VERSION="4.4"
+VERSION="4.5"
 
 # --- 加载公共库 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -292,6 +292,10 @@ download_argo() {
 # ==========================================
 generate_keys() {
     local output priv pub
+    # 保存原始 stdout，将函数内所有 stdout 重定向到 stderr
+    exec 3>&1 4>&2
+    exec 1>&2
+
     _log_info "正在生成 X25519 密钥..."
 
     # 确保 Xray 二进制可用
@@ -324,6 +328,8 @@ generate_keys() {
         exit 1
     fi
 
+    # 恢复 stdout，输出密钥
+    exec 1>&3 2>&4 3>&- 4>&-
     echo "${priv}:${pub}"
 }
 
