@@ -861,7 +861,7 @@ EOF
         deploy_hy2
     fi
 
-    clear
+    clear 2>/dev/null || true
     print_nodes
     _log_success "部署任务完成！"
 }
@@ -941,7 +941,7 @@ uninstall_all() {
 # 主菜单
 # ==========================================
 main_menu() {
-    clear
+    clear 2>/dev/null || true
     echo -e "${CYAN}=========================================${NC}"
     echo -e "${CYAN}   jiaoben 一键脚本 v${VERSION}${NC}"
     echo -e "${CYAN}=========================================${NC}"
