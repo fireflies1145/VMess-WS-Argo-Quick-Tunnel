@@ -876,7 +876,7 @@ EOF
         fi
 
         local encoded_path; encoded_path=$(printf '%s' "$path" | sed 's|/|%2F|g')
-        local argo_link="vless://${uuid}@${argo_domain}:443?encryption=none&type=ws&path=${encoded_path}&security=tls&sni=${argo_domain}&fp=chrome#Argo"
+        local argo_link="vless://${uuid}@${argo_domain}:443?encryption=none&flow=&type=ws&path=${encoded_path}&security=tls&sni=${argo_domain}&fp=chrome#Argo"
         append_node "Argo 隧道 (VLESS)" "$argo_link"
         _log_success "Argo 部署完成！"
     fi
