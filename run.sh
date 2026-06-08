@@ -174,15 +174,15 @@ download_file() {
 
     for i in $(seq 1 $retries); do
         _log_info "下载 $desc (尝试 $i/$retries)..."
-        # 优先尝试镜像
-        if curl -fsSL --connect-timeout 10 --max-time 300 "$mirror_url" -o "$dest" 2>/dev/null; then
+        # 优先尝试镜像（-# 显示进度条）
+        if curl -fSL --connect-timeout 10 --max-time 300 -# "$mirror_url" -o "$dest" 2>/dev/null; then
             [[ -s "$dest" ]] && return 0
         fi
         # 回退原始链接
         if wget -q --timeout=60 --show-progress "$url" -O "$dest" 2>/dev/null; then
             [[ -s "$dest" ]] && return 0
         fi
-        if curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o "$dest" 2>/dev/null; then
+        if curl -fSL --connect-timeout 30 --max-time 300 -# "$url" -o "$dest" 2>/dev/null; then
             [[ -s "$dest" ]] && return 0
         fi
         rm -f "$dest"
