@@ -166,9 +166,18 @@ verify_sha256() {
 # ==========================================
 download_file() {
     local url="$1" dest="$2" desc="$3" retries=3 i
+    # GitHub 镜像代理（国内加速）
+    local mirror="https://ghfast.top"
+    local mirror_url
+    mirror_url=$(echo "$url" | sed "s|https://github.com|${mirror}|")
 
     for i in $(seq 1 $retries); do
         _log_info "下载 $desc (尝试 $i/$retries)..."
+        # 优先尝试镜像
+        if curl -fsSL --connect-timeout 10 --max-time 300 "$mirror_url" -o "$dest" 2>/dev/null; then
+            [[ -s "$dest" ]] && return 0
+        fi
+        # 回退原始链接
         if wget -q --timeout=60 --show-progress "$url" -O "$dest" 2>/dev/null; then
             [[ -s "$dest" ]] && return 0
         fi
@@ -232,8 +241,11 @@ download_xray() {
 
     # SHA256 校验
     local expected=""
-    if wget -q "https://github.com/XTLS/Xray-core/releases/download/${version}/Xray-linux-${arch}.zip.dgst" \
-        -O "$WORK_DIR/xray.zip.dgst" 2>/dev/null; then
+    local dgst_url="https://github.com/XTLS/Xray-core/releases/download/${version}/Xray-linux-${arch}.zip.dgst"
+    local dgst_mirror
+    dgst_mirror=$(echo "$dgst_url" | sed "s|https://github.com|${mirror}|")
+    if wget -q --timeout=15 "$dgst_mirror" -O "$WORK_DIR/xray.zip.dgst" 2>/dev/null || \
+       wget -q --timeout=15 "$dgst_url" -O "$WORK_DIR/xray.zip.dgst" 2>/dev/null; then
         expected=$(grep -oP 'SHA256=\K[a-f0-9]{64}' "$WORK_DIR/xray.zip.dgst" 2>/dev/null || echo "")
     fi
     [[ -n "$expected" ]] && verify_sha256 "$WORK_DIR/xray.zip" "$expected"
