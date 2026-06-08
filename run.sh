@@ -360,7 +360,7 @@ gen_hex() {
 # ==========================================
 # 节点信息管理
 # ==========================================
-_init_nodes_file() { [[ ! -f "$NODES_FILE" ]] && echo "# jiaoben 节点信息" > "$NODES_FILE" || true; }
+_init_nodes_file() { mkdir -p "$WORKDIR_BASE"; [[ ! -f "$NODES_FILE" ]] && echo "# jiaoben 节点信息" > "$NODES_FILE" || true; }
 
 append_node() {
     local name="$1" link="$2"
@@ -689,6 +689,7 @@ deploy_core() {
     install_deps
 
     # mode 4 不清空节点文件
+    mkdir -p "$WORKDIR_BASE"
     [[ "$mode" -eq 4 ]] || : > "$NODES_FILE"
 
     # ==================== REALITY ====================
