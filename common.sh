@@ -59,9 +59,12 @@ generate_uuid() {
         uuidgen
     else
         # fallback：手动构造 UUID v4 格式
-        local hex
-        hex=$(od -An -N16 -x /dev/urandom | tr -d '[:space:]')
-        echo "${hex:0:8}-${hex:8:4}-4${hex:13:3}-${hex:17:4}-${hex:21:12}"
+        local hex variant_char
+        hex=$(od -An -N16 -x /dev/urandom 2>/dev/null | tr -d '[:space:]')
+        [[ ${#hex} -ge 32 ]] || hex=$(openssl rand -hex 16 2>/dev/null)
+        # 设置 UUID v4 variant 位 (10xx = 8/9/a/b)
+        variant_char=$(printf '%x' $(( 0x8 | (0x${hex:16:1} & 0x3) )))
+        echo "${hex:0:8}-${hex:8:4}-4${hex:12:3}-${variant_char}${hex:16:3}-${hex:20:12}"
     fi
 }
 
@@ -69,7 +72,7 @@ generate_uuid() {
 generate_password() {
     local len="${1:-16}"
     openssl rand -hex "$len" 2>/dev/null || \
-        od -An -N"$len" /dev/urandom | tr -d '[:space:]' | head -c "$((len * 2))"
+        od -An -N"$len" -x /dev/urandom 2>/dev/null | tr -d '[:space:]' | head -c "$((len * 2))"
 }
 
 # --- 创建必要目录 ---
@@ -123,5 +126,7 @@ handle_error() {
 }
 
 set_error_trap() {
+    # 使用 -E 让 ERR trap 在函数中也生效
+    set -E
     trap 'handle_error ${LINENO}' ERR
 }

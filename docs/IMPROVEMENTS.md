@@ -1,67 +1,42 @@
 # jiaoben 项目改进日志
 
-## 版本 6.0 - 全面修复与安全加固版本
+## 版本 5.1 - Bug 修复版本
 
-**发布日期**: 2026-06-07  
-**优化范围**: Bug 修复、安全加固、运维增强
+**发布日期**: 2026-06-28  
+**优化范围**: 关键 Bug 修复、兼容性改进
 
-### 🎯 v6.0 主要改进
+### 🎯 v5.1 主要改进
 
-#### 1. 错误处理增强
-- ✅ `set -Eeuo pipefail` 替代 `set -uo pipefail`，添加 `errtrace`
-- ✅ 全局 `trap ERR` 捕获所有未处理错误
-- ✅ 所有函数添加明确的返回值检查
-- ✅ 行号报告帮助快速定位问题
+#### 1. UUID 生成修复
+- ✅ 修正 `gen_uuid()` / `generate_uuid()` 子串偏移错误
+- ✅ 正确设置 UUID v4 variant 位 (8/9/a/b)
+- ✅ 生成的 UUID 现在符合 RFC 4122 标准
 
-#### 2. 安全加固
-- ✅ `validate_json()` — JSON 配置有效性验证
-- ✅ `download_sha256()` — SHA256 校验值格式验证（必须为 64 位十六进制）
-- ✅ `validate_ip()` — IP 地址格式验证
-- ✅ `generate_uuid()` 使用 `openssl rand -hex 16` 替代 `/dev/urandom`
-- ✅ 所有变量使用 `${var}` 格式，防止 word splitting
+#### 2. bash 兼容性
+- ✅ `${var,,}` 替换为 `tr '[:upper:]' '[:lower:]'`，兼容 bash 3.x+
+- ✅ `wget 2>&1` 修正为 `2>/dev/null`
 
-#### 3. 运维增强
-- ✅ `health_check()` — 部署后自动验证服务健康状态
-- ✅ `rotate_argo_log()` — Argo 日志自动轮转（10MB 阈值）
-- ✅ `add_firewall_rule()` — 防火墙规则自动持久化
-- ✅ `get_public_ip()` — 5 源 IP 检测自动 fallback
-- ✅ `validate_json()` — 配置更新前验证有效性
+#### 3. 安全性增强
+- ✅ `openssl dgst` 输出解析使用 `awk` 替代 `cut`，适配多版本
+- ✅ `generate_password()` fallback 添加缺失的 `-x` 参数
+- ✅ `add_firewall_rule()` 自动持久化 iptables 规则
+- ✅ `add_firewall_rule()` 支持 TCP 协议参数
 
 #### 4. 代码质量
-- ✅ 函数职责更清晰，减少重复代码
-- ✅ 变量引用统一使用双引号
-- ✅ 日志格式统一（带时间戳）
-- ✅ 错误消息更友好、更有帮助
+- ✅ YAML 生成使用 `printf '%b'` 替代 `echo -e`，避免命令替换换行丢失
+- ✅ `set_error_trap` 统一添加 `set -E`
+- ✅ uninstall.sh 颜色变量转义修正
 
 ### 📁 文件变更
 
 | 文件 | 变更说明 |
 |------|---------|
-| `run.sh` | 全面重写，所有 bug 修复和优化 |
-| `common.sh` | 更新 `generate_uuid()` 使用 openssl，添加 `set -E` |
-| `unrun.sh` | 统一路径配置，添加错误陷阱 |
-| `jb_improved.sh` | 修复 sudo 检查，统一版本号 |
-| `README.md` | 更新至 v6.0，添加新特性说明 |
-| `CHANGELOG.md` | 新增 v6.0 更新记录 |
-| `IMPROVEMENTS.md` | 本文件 |
-
-### 🧪 测试建议
-
-```bash
-# 测试版本号
-sudo bash run.sh --version
-
-# 测试 JSON 验证
-echo '{"test": true}' > /tmp/test.json
-bash -c 'source run.sh; validate_json /tmp/test.json && echo "OK"'
-
-# 测试 SHA256 验证
-echo "test" > /tmp/test.file
-sha256sum /tmp/test.file
-
-# 测试 IP 检测
-bash -c 'source run.sh; get_public_ip'
-```
+| `run.sh` | wget修正、UUID修复、bash兼容、防火墙增强、YAML改进、版本号 v5.1 |
+| `common.sh` | UUID修复、generate_password改进、set_error_trap统一 |
+| `uninstall.sh` | 颜色变量转义修正 |
+| `docs/CHANGELOG.md` | 版本号修正，移除不存在的功能描述 |
+| `docs/IMPROVEMENTS.md` | 本文件更新 |
+| `README.md` | 更新版本号至 v5.1 |
 
 ### 🔒 安全建议（仍然适用）
 

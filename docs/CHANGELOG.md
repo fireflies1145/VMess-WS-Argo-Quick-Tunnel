@@ -1,51 +1,39 @@
 # jiaoben 项目更新日志
 
-## v6.0 - 2026-06-07 (全面修复与安全加固)
+## v5.1 - 2026-06-28 (Bug 修复)
 
 ### 🐛 Bug 修复
 
-1. **`set -Eeuo pipefail` 替代 `set -uo pipefail`** — 添加 `errtrace` 使 trap ERR 在函数内生效
-2. **全局错误陷阱** — 新增 `trap ERR` 在脚本级别捕获所有错误
-3. **JSON 配置安全构建** — `deploy_argo()` 追加配置前先用 `validate_json()` 验证文件有效性
-4. **`download_sha256()` 安全校验** — 独立函数验证 SHA256 格式（必须为 64 位十六进制）
-5. **`update_component()` 函数调用修复** — 使用 `"${download_fn}"` 安全调用函数引用
-6. **Argo 域名获取超时处理** — 超时后给出明确提示而非静默使用硬编码域名
-7. **IP 获取失败检测** — `validate_ip()` 函数验证 IP 格式，失败时阻止生成无效节点链接
-8. **防火墙规则持久化** — `add_firewall_rule()` 自动调用 `iptables-save` 持久化规则
-9. **端口跳跃和自定义端口统一处理** — `add_firewall_rule()` 同时支持两种场景
-10. **变量引用统一** — 所有变量使用 `${var}` 格式，防止歧义
-
-### 💡 优化
-
-1. **多源 IP 检测** — `get_public_ip()` 使用 5 个服务源自动 fallback（ifconfig.me, ipinfo.io, icanhazip.com, api.ipify.org, checkip.amazonaws.com）
-2. **JSON 配置验证** — `validate_json()` 函数用 `jq empty` 验证配置文件有效性
-3. **服务健康检查** — `health_check()` 函数在部署后验证服务是否正常运行
-4. **日志轮转** — `rotate_argo_log()` 自动轮转超过 10MB 的 Argo 日志
-5. **SHA256 下载优化** — `download_sha256()` 独立函数，格式验证，错误处理
-6. **防火墙管理统一** — `add_firewall_rule()` 支持 UFW 和 iptables，自动持久化
-7. **错误处理增强** — 所有函数添加明确的错误处理和返回值检查
-8. **代码结构优化** — 函数职责更清晰，减少重复代码
-9. **变量引用安全** — 所有字符串使用双引号包裹，防止 word splitting
-10. **日志格式统一** — 所有日志使用统一的时间戳格式
+1. **`wget` 重定向修复** — `2>&1` 修正为 `2>/dev/null`
+2. **UUID v4 格式修复** — 修正子串偏移错误，添加 variant 位设置，生成符合标准的 UUID
+3. **bash 兼容性** — `${var,,}` 替换为 `tr '[:upper:]' '[:lower:]'`，兼容 bash 3.x
+4. **openssl 输出解析** — 使用 `awk '{print $NF}'` 替代 `cut -d' ' -f2`，适配不同版本
+5. **YAML 生成改进** — 使用 `printf '%b'` 替代 `echo -e`，避免命令替换中换行丢失
+6. **防火墙规则持久化** — 添加 `iptables-save` / `netfilter-persistent save` 自动持久化
+7. **防火墙支持 TCP** — `add_firewall_rule()` 新增 proto 参数，支持 TCP/UDP
+8. **颜色变量修复** — uninstall.sh 中 `\033` 转义修正
+9. **generate_password fallback** — 添加缺失的 `-x` 参数
+10. **set_error_trap 改进** — 统一添加 `set -E` 确保 ERR trap 在函数内传播
 
 ### 📝 文档更新
 
-- README.md 更新至 v6.0
-- CHANGELOG.md 新增 v6.0 更新记录
-- IMPROVEMENTS.md 新增 v6.0 改进说明
-- SECURITY.md 保持不变（安全实践仍然适用）
+- CHANGELOG.md 修正版本号与文件引用
+- IMPROVEMENTS.md 移除不存在的功能描述
+- README.md 版本号更新至 v5.1
 
 ---
 
-## v5.0 - 2026-06-06
+## v5.0 - 2026-06-08
 
 ### 主要变更
+- xray 二进制有效性校验
+- 错误陷阱连锁修复
+- set -u 兼容
 - 版本统一、路径动态化
 - GitHub API 兼容
 - dnf 支持
 - IPv6 支持
 - 函数拆分
-- 更新机制
 
 ---
 

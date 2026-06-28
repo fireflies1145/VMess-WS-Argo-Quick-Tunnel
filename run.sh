@@ -6,7 +6,7 @@
 # ==========================================
 set -Euo pipefail
 
-VERSION="5.0"
+VERSION="5.1"
 
 # --- 加载公共库 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -153,7 +153,7 @@ verify_sha256() {
     [[ -z "$expected" ]] && return 0
     actual=$(sha256sum "$file" 2>/dev/null | cut -d' ' -f1)
     [[ -z "$actual" ]] && actual=$(shasum -a 256 "$file" 2>/dev/null | cut -d' ' -f1)
-    [[ -z "$actual" ]] && actual=$(openssl dgst -sha256 "$file" 2>/dev/null | cut -d' ' -f2)
+    [[ -z "$actual" ]] && actual=$(openssl dgst -sha256 "$file" 2>/dev/null | awk '{print $NF}' || true)
     if [[ "$actual" != "$expected" ]]; then
         rm -f "$file"
         _log_error "SHA256 校验失败: 期望 $expected, 实际 $actual"; exit 1
@@ -172,7 +172,7 @@ download_file() {
         if curl -fSL --connect-timeout 10 --max-time 300 -# "$url" -o "$dest"; then
             [[ -s "$dest" ]] && return 0
         fi
-        if wget --timeout=60 --show-progress "$url" -O "$dest" 2>&1; then
+        if wget --timeout=60 --show-progress "$url" -O "$dest" 2>/dev/null; then
             [[ -s "$dest" ]] && return 0
         fi
         rm -f "$dest"
@@ -342,10 +342,12 @@ gen_uuid() {
     elif command -v uuidgen &>/dev/null; then
         uuidgen
     else
-        local h
+        local h variant_char
         h=$(od -An -N16 -x /dev/urandom 2>/dev/null | tr -d '[:space:]')
         [[ ${#h} -ge 32 ]] || h=$(openssl rand -hex 16 2>/dev/null)
-        echo "${h:0:8}-${h:8:4}-4${h:13:3}-${h:17:4}-${h:21:12}"
+        # 设置 UUID v4 variant 位 (10xx = 8/9/a/b)
+        variant_char=$(printf '%x' $(( 0x8 | (0x${h:16:1} & 0x3) )))
+        echo "${h:0:8}-${h:8:4}-4${h:12:3}-${variant_char}${h:16:3}-${h:20:12}"
     fi
 }
 
@@ -393,20 +395,29 @@ print_nodes() {
 # ==========================================
 add_firewall_rule() {
     local colon_range="$1"
+    local proto="${2:-udp}"
     # UFW
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
-        ufw allow proto udp from any to any port "$colon_range" 2>/dev/null || true
-        _log_info "UFW 规则已添加: ${colon_range}/udp"
+        ufw allow proto "$proto" from any to any port "$colon_range" 2>/dev/null || true
+        _log_info "UFW 规则已添加: ${colon_range}/${proto}"
     # firewalld
     elif command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld 2>/dev/null; then
-        firewall-cmd --add-port="${colon_range}/udp" --permanent 2>/dev/null || true
+        firewall-cmd --add-port="${colon_range}/${proto}" --permanent 2>/dev/null || true
         firewall-cmd --reload 2>/dev/null || true
-        _log_info "firewalld 规则已添加: ${colon_range}/udp"
+        _log_info "firewalld 规则已添加: ${colon_range}/${proto}"
     # iptables
     elif command -v iptables &>/dev/null; then
-        iptables -C INPUT -p udp --dport "$colon_range" -j ACCEPT 2>/dev/null || \
-            iptables -A INPUT -p udp --dport "$colon_range" -j ACCEPT 2>/dev/null || true
-        _log_info "iptables 规则已添加: ${colon_range}/udp（重启后需保存）"
+        iptables -C INPUT -p "$proto" --dport "$colon_range" -j ACCEPT 2>/dev/null || \
+            iptables -A INPUT -p "$proto" --dport "$colon_range" -j ACCEPT 2>/dev/null || true
+        # 持久化 iptables 规则
+        if command -v iptables-save &>/dev/null; then
+            if [[ -d /etc/iptables ]]; then
+                iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            elif command -v netfilter-persistent &>/dev/null; then
+                netfilter-persistent save 2>/dev/null || true
+            fi
+        fi
+        _log_info "iptables 规则已添加: ${colon_range}/${proto}（已持久化）"
     fi
 }
 
@@ -441,7 +452,7 @@ deploy_hy2() {
     local listen_addr=":${port}" firewall_port_range="$port"
 
     read -p "是否开启端口跳跃 [y/N]: " hop_choice
-    [[ "${hop_choice,,}" =~ ^y(es)?$ ]] && port_hop_enabled="yes"
+    [[ "$(echo "$hop_choice" | tr '[:upper:]' '[:lower:]')" =~ ^y(es)?$ ]] && port_hop_enabled="yes"
 
     if [[ "$port_hop_enabled" == "yes" ]]; then
         local default_port_end=$((port + 75)) port_end
@@ -501,7 +512,7 @@ deploy_hy2() {
                     if [[ -z "$resolved" ]]; then
                         _log_warn "域名 $acme_domain 无法解析，ACME 可能失败"
                         read -p "继续？[y/N]: " cont
-                        [[ "${cont,,}" =~ ^y(es)?$ ]] || continue 2
+                        [[ "$(echo "$cont" | tr '[:upper:]' '[:lower:]')" =~ ^y(es)?$ ]] || continue 2
                     else
                         _log_info "解析: $resolved"
                     fi
@@ -568,13 +579,13 @@ deploy_hy2() {
 listen: ${listen_addr}
 
 tls:
-$(echo -e "$tls_block")
+$(printf '%b' "$tls_block")
 
 auth:
   type: password
   password: ${pass}
 
-$(echo -e "$bw_block")
+$(printf '%b' "$bw_block")
 
 sniff:
   enable: true
