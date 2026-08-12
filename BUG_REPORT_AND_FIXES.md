@@ -210,12 +210,11 @@ variant_char=$(printf '%x' $(( 0x8 | (0x${h:16:1} & 0x3) )))
 
 ## ⚠️ 推送状态
 
-**推送失败** — 提供的 token `ghp_hSiV1WAKUF67DzF8KYWsUsTDqh4v5478V58` 已被 GitHub 拒绝 (HTTP 401 Bad credentials)。
+**推送失败** — 之前提供的 token 已失效并已从文档中移除（请务必吊销任何曾出现在此文件中的凭证）。
 
-所有修复已在 `/workspace/jiaoben/` 本地完成。请提供有效的 GitHub Personal Access Token 后重新推送，或手动执行:
+所有修复已在本地完成。推送方式:
 
 ```bash
-cd /workspace/jiaoben
 git remote set-url origin https://<username>:<valid-token>@github.com/fireflies1145/jiaoben.git
 git push origin main
 ```

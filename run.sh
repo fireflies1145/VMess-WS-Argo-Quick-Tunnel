@@ -6,7 +6,7 @@
 # ==========================================
 set -Euo pipefail
 
-VERSION="5.1"
+VERSION="5.2"
 
 # --- 加载公共库 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -97,6 +97,13 @@ check_env() {
     [[ -d "$ARGO_BIN" ]] && rm -rf "$ARGO_BIN"
     [[ -d "$HY2_BIN" ]] && rm -rf "$HY2_BIN"
     mkdir -p "$WORK_DIR" "$XRAY_DIR"
+
+    # 安装 jb 管理工具（若存在 jb_improved.sh）
+    if [[ -f "$SCRIPT_DIR/jb_improved.sh" && ! -e /usr/local/bin/jb ]]; then
+        if install -m 0755 "$SCRIPT_DIR/jb_improved.sh" /usr/local/bin/jb 2>/dev/null; then
+            _log_info "管理工具已安装: 可使用 'jb status' / 'jb logs xray' 等命令"
+        fi
+    fi
 }
 
 # ==========================================
@@ -263,8 +270,13 @@ download_hy2() {
     download_file "$bin_url" "$HY2_BIN" "Hysteria2"
 
     local expected
+    # 注意: hysteria 官方 release 无逐文件 .sha256，通常取不到（校验将被跳过）
     expected=$(curl -fsSL --connect-timeout 10 "${bin_url}.sha256" 2>/dev/null | cut -d' ' -f1 || echo "")
-    [[ -n "$expected" ]] && verify_sha256 "$HY2_BIN" "$expected"
+    if [[ -n "$expected" ]]; then
+        verify_sha256 "$HY2_BIN" "$expected"
+    else
+        _log_warn "未获取到 Hysteria2 校验和，跳过 SHA256 校验"
+    fi
     chmod +x "$HY2_BIN"
     _log_success "Hysteria2 下载完成"
 }
@@ -281,8 +293,13 @@ download_argo() {
     download_file "$bin_url" "$ARGO_BIN" "Cloudflared"
 
     local expected
+    # 注意: cloudflared 官方 release 无逐文件 .sha256，通常取不到（校验将被跳过）
     expected=$(curl -fsSL --connect-timeout 10 "${bin_url}.sha256" 2>/dev/null | cut -d' ' -f1 || echo "")
-    [[ -n "$expected" ]] && verify_sha256 "$ARGO_BIN" "$expected"
+    if [[ -n "$expected" ]]; then
+        verify_sha256 "$ARGO_BIN" "$expected"
+    else
+        _log_warn "未获取到 Cloudflared 校验和，跳过 SHA256 校验"
+    fi
     chmod +x "$ARGO_BIN"
     _log_success "Cloudflared 下载完成"
 }
@@ -466,7 +483,8 @@ deploy_hy2() {
         read -p "跳跃间隔（默认 25s）: " hop_interval
         port_hop_interval="${hop_interval:-25s}"
         port_hop_range="${port}-${port_end}"
-        listen_addr=":${port_hop_range}"
+        # 注意: Hysteria2 服务端始终监听单一端口，端口跳跃靠 NAT 把区间重定向到该端口
+        listen_addr=":${port}"
         firewall_port_range="${port}-${port_end}"
         _log_info "端口跳跃: ${port_hop_range} 间隔: ${port_hop_interval}"
     fi
@@ -602,14 +620,15 @@ quic:
 EOF
 
     if [[ "$port_hop_enabled" == "yes" ]]; then
-        cat >> "$HY2_CONFIG" <<EOF
-
-portHopping:
-  interval: ${port_hop_interval}
-EOF
+        # Hysteria2 服务端无 portHopping 字段；端口跳跃通过 iptables/nftables
+        # 把 UDP 端口区间 DNAT 重定向到实际监听端口来实现（见下方 add_hop_redirect）
+        :
     fi
 
     if [[ "$cert_method" == "self" || "$cert_method" == "custom" ]]; then
+        # masquerade.proxy.insecure 需要 bool 值（true/false），而节点链接用 1/0
+        local yaml_insecure="false"
+        [[ "$insecure" == "1" ]] && yaml_insecure="true"
         cat >> "$HY2_CONFIG" <<EOF
 
 masquerade:
@@ -617,7 +636,7 @@ masquerade:
   proxy:
     url: https://${sni}
     rewriteHost: true
-    insecure: ${insecure}
+    insecure: ${yaml_insecure}
 EOF
     fi
 
@@ -627,6 +646,20 @@ EOF
     # 防火墙
     local colon_range; colon_range=$(echo "$firewall_port_range" | tr '-' ':')
     add_firewall_rule "$colon_range"
+
+    # 端口跳跃：把 UDP 区间 DNAT 重定向到实际监听端口
+    if [[ "$port_hop_enabled" == "yes" ]] && command -v iptables &>/dev/null; then
+        iptables -t nat -C PREROUTING -p udp --dport "$colon_range" -j DNAT --to-destination ":${port}" 2>/dev/null || \
+            iptables -t nat -A PREROUTING -p udp --dport "$colon_range" -j DNAT --to-destination ":${port}" 2>/dev/null || true
+        if command -v iptables-save &>/dev/null; then
+            if [[ -d /etc/iptables ]]; then
+                iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            elif command -v netfilter-persistent &>/dev/null; then
+                netfilter-persistent save 2>/dev/null || true
+            fi
+        fi
+        _log_info "端口跳跃 DNAT 已配置: ${port_hop_range} → ${port}"
+    fi
 
     # systemd 服务
     cat > "/etc/systemd/system/jiaoben-hy2.service" <<EOF
@@ -690,6 +723,16 @@ service_exists() {
 get_public_ip() {
     curl -s4 ifconfig.me 2>/dev/null || curl -s6 ifconfig.me 2>/dev/null || \
     curl -s ip.sb 2>/dev/null || echo "YOUR_IP"
+}
+
+# --- 若为 IPv6 地址则加方括号（用于 URL） ---
+fmt_host() {
+    local h="$1"
+    if [[ "$h" == *:* && "$h" != \[*\] ]]; then
+        echo "[$h]"
+    else
+        echo "$h"
+    fi
 }
 
 # ==========================================
@@ -766,8 +809,12 @@ EOF
         systemctl daemon-reload
         systemctl enable --now jiaoben-xray
 
+        # 为 REALITY 放行 TCP 443
+        add_firewall_rule "443" "tcp"
+
         local pub_ip; pub_ip=$(get_public_ip)
-        local reality_link="vless://${uuid}@${pub_ip}:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${domain}&fp=chrome&pbk=${pub}&sid=${sid}&type=tcp&headerType=none#REALITY"
+        local link_host; link_host=$(fmt_host "$pub_ip")
+        local reality_link="vless://${uuid}@${link_host}:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${domain}&fp=chrome&pbk=${pub}&sid=${sid}&type=tcp&headerType=none#REALITY"
         append_node "REALITY (VLESS)" "$reality_link"
         _log_success "REALITY 部署完成！"
     fi
@@ -883,8 +930,9 @@ EOF
         if argo_domain=$(get_argo_domain); then
             _log_success "Argo 域名: $argo_domain"
         else
-            argo_domain="yg1.ygkkk.dpdns.org"
-            _log_warn "获取超时，使用备用域名: $argo_domain"
+            _log_error "无法获取 Argo 隧道域名，请检查 cloudflared 日志: ${WORK_DIR}/argo.log"
+            _log_warn "可运行 'journalctl -u jiaoben-argo -n 50' 排查，然后重新执行部署"
+            exit 1
         fi
 
         local encoded_path; encoded_path=$(printf '%s' "$path" | sed 's|/|%2F|g')

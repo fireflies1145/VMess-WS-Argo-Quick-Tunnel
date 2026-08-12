@@ -1,5 +1,19 @@
 # jiaoben 项目更新日志
 
+## v5.2 - 2026-08-12 (Bug 修复)
+
+### 🐛 Bug 修复
+
+1. **Hysteria2 端口跳跃修复** — 服务端不再写非法的 `listen: :20000-20075` 和不存在的 `portHopping` 字段；改为固定监听单端口，并用 iptables NAT 将 UDP 端口区间 DNAT 重定向到监听端口
+2. **masquerade.insecure 类型修复** — YAML 中输出 `true/false` bool 值（原来写 `1` 或空值会导致 hysteria 解析失败）
+3. **REALITY 防火墙放行** — 部署 REALITY 时新增放行 TCP 443（原来仅 Hysteria2 调用防火墙函数）
+4. **IPv6 节点链接修复** — 公网 IP 为 IPv6 时自动加方括号 `[...]`，避免链接格式错误
+5. **Argo 域名回退修复** — 获取隧道域名超时时改为报错退出，不再回退到第三方域名 `yg1.ygkkk.dpdns.org`
+6. **jb 管理工具安装** — check_env 时将 jb_improved.sh 安装为 /usr/local/bin/jb（README 与 uninstall.sh 均引用该命令，原来从未安装）
+7. **SHA256 校验提示** — Hysteria2/Cloudflared 无逐文件校验和时明确提示「跳过校验」，不再静默略过
+
+---
+
 ## v5.1 - 2026-06-28 (Bug 修复)
 
 ### 🐛 Bug 修复
