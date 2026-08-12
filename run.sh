@@ -6,7 +6,7 @@
 # ==========================================
 set -Euo pipefail
 
-VERSION="5.2"
+VERSION="5.3"
 
 # --- 加载公共库 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -758,7 +758,7 @@ deploy_core() {
         priv=$(echo "$keys" | cut -d: -f1)
         pub=$(echo "$keys" | cut -d: -f2)
         sid=$(gen_hex 8)
-        domain="www.microsoft.com"
+        domain="www.amd.com"
 
         backup_config
         cat > "$XRAY_CONFIG" <<EOF
@@ -1030,7 +1030,7 @@ main_menu() {
     echo -e "${CYAN}=========================================${NC}"
     echo -e "${CYAN}   jiaoben 一键脚本 v${VERSION}${NC}"
     echo -e "${CYAN}=========================================${NC}"
-    echo "1. 部署 REALITY (VLESS)       — 端口 443，高性能"
+    echo "1. 部署 REALITY (VLESS)       — 端口 443，伪装 www.amd.com"
     echo "2. 部署 Argo 隧道 (VLESS)     — 无需暴露真实 IP"
     echo "3. 部署 Hysteria2             — 基于 QUIC，低延迟"
     echo "4. 一键部署全部"

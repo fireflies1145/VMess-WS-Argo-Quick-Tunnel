@@ -1,5 +1,14 @@
 # jiaoben 项目更新日志
 
+## v5.3 - 2026-08-12
+
+### ✨ 变更
+
+- **REALITY 伪装目标改为 `www.amd.com`**（原 `www.microsoft.com`）—— 已实测该站支持 TLS 1.3 / HTTP/2 / X25519，证书由 DigiCert GeoTrust 签发
+- README 与菜单文案同步更新，并新增「REALITY 伪装目标」说明章节
+
+---
+
 ## v5.2 - 2026-08-12 (Bug 修复)
 
 ### 🐛 Bug 修复

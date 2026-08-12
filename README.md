@@ -13,17 +13,29 @@ bash <(curl -fsSL https://raw.githubusercontent.com/fireflies1145/jiaoben/main/r
 
 ## ✨ 功能
 
-- **REALITY (VLESS)** — 端口 443，高性能抗封锁
+- **REALITY (VLESS)** — 端口 443，高性能抗封锁，默认借用 `www.amd.com` 证书（SNI 伪装目标）
 - **Argo 隧道** — 无需暴露真实 IP，通过 Cloudflare 隧道
 - **Hysteria2** — 基于 QUIC，低延迟，支持端口跳跃
 - **Systemd 管理** — 所有服务开机自启、故障自动恢复
 - **SHA256 校验** — 下载组件自动验证完整性
 - **多架构** — x86_64 / ARM64
 
+## 🎭 REALITY 伪装目标
+
+默认借用 `www.amd.com`（已验证支持 TLS 1.3、HTTP/2、X25519，证书由 DigiCert/GeoTrust 签发）。
+
+如需更换，编辑 `run.sh` 中 REALITY 部署段的 `domain` 变量：
+
+```bash
+domain="www.amd.com"   # 改为其他支持 TLS1.3 + H2 的境外站点
+```
+
+更换后需同时重新部署，客户端链接中的 `sni` 会自动跟随该域名。
+
 ## 📋 菜单
 
 ```
-1. 部署 REALITY (VLESS)       — 端口 443，高性能
+1. 部署 REALITY (VLESS)       — 端口 443，高性能（伪装 www.amd.com）
 2. 部署 Argo 隧道 (VLESS)     — 无需暴露真实 IP
 3. 部署 Hysteria2             — 基于 QUIC，低延迟
 4. 一键部署全部
@@ -79,4 +91,4 @@ MIT License
 
 ---
 
-**当前版本**: v5.2 (2026-08-12)
+**当前版本**: v5.3 (2026-08-12)
