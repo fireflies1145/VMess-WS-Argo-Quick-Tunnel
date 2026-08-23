@@ -7,11 +7,16 @@
 set -Euo pipefail
 
 # 加载公共配置
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR/common.sh" ]]; then
-    source "$SCRIPT_DIR/common.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || SCRIPT_DIR=""
+COMMON_SH=""
+for _cand in "$SCRIPT_DIR/common.sh" "/usr/local/lib/jiaoben/common.sh"; do
+    [[ -n "$_cand" && -f "$_cand" ]] && { COMMON_SH="$_cand"; break; }
+done
+if [[ -n "$COMMON_SH" ]]; then
+    # shellcheck source=/dev/null
+    source "$COMMON_SH"
 else
-    echo "[ERROR] 未找到 common.sh，请确保在同一目录下运行" >&2
+    echo "[ERROR] 未找到 common.sh（已查找脚本同目录与 /usr/local/lib/jiaoben/）" >&2
     exit 1
 fi
 

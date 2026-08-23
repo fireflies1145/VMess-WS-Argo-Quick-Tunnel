@@ -47,8 +47,19 @@ domain="www.amd.com"   # 改为其他支持 TLS1.3 + H2 的境外站点
 
 ## 🔧 服务管理
 
+部署后会自动安装 `jb` 管理工具：
+
 ```bash
-# 手动管理
+jb status          # 查看所有服务状态
+jb list            # 列出已安装服务
+jb nodes           # 显示所有节点链接
+jb restart hy2     # 重启 Hysteria2
+jb logs xray       # 实时查看 Xray 日志
+```
+
+也可以直接用 systemd 管理：
+
+```bash
 systemctl status jiaoben-xray    # REALITY
 systemctl status jiaoben-hy2     # Hysteria2
 systemctl status jiaoben-argo    # Argo 隧道
@@ -59,13 +70,22 @@ journalctl -u jiaoben-xray -n 50 # 查看日志
 
 ```
 ~/.jiaoben/
-├── all_nodes_info.txt    # 节点链接
+├── all_nodes_info.txt    # 节点链接（可读渲染）
+├── nodes.tsv             # 节点记录（按协议去重）
 ├── config.json           # Xray 配置
 ├── hy2_config.yaml       # Hysteria2 配置
 ├── xray/xray             # Xray 二进制
 ├── hysteria              # Hysteria2 二进制
 └── cloudflared           # Cloudflared 二进制
 ```
+
+## 🧪 测试
+
+```bash
+bash tests/run_tests.sh
+```
+
+回归测试覆盖节点链接生成、配置合并、UUID 合规性等 32 项检查，不需要 root、不联网、不修改系统。
 
 ## 🗑️ 卸载
 
@@ -81,7 +101,8 @@ jiaoben/
 ├── run.sh           # ⭐ 一键部署脚本
 ├── common.sh        # 公共函数库
 ├── uninstall.sh     # 独立卸载脚本
-├── jb_improved.sh   # 运维管理工具
+├── jb_improved.sh   # 运维管理工具（安装为 jb）
+├── tests/           # 回归测试
 └── docs/
 ```
 
@@ -91,4 +112,4 @@ MIT License
 
 ---
 
-**当前版本**: v5.3 (2026-08-12)
+**当前版本**: v5.4 (2026-08-23)

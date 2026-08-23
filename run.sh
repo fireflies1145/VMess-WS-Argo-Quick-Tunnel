@@ -6,11 +6,14 @@
 # ==========================================
 set -Euo pipefail
 
-VERSION="5.3"
+VERSION="5.4"
 
 # --- 加载公共库 ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR/common.sh" ]]; then
+# 注意：以 bash <(curl ...) 或 curl | bash 方式运行时，BASH_SOURCE 指向 /dev/fd/N，
+# SCRIPT_DIR 不是真实目录，此时同目录文件不可用（后续按需从仓库拉取）。
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/fireflies1145/jiaoben/main}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || SCRIPT_DIR=""
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/common.sh" ]]; then
     source "$SCRIPT_DIR/common.sh"
 fi
 
@@ -25,7 +28,6 @@ if [[ -z "${RED:-}" ]]; then
     RED='\033[0;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'
     CYAN='\033[0;36m'
     NC='\033[0m'
 fi
@@ -88,8 +90,14 @@ check_env() {
         _log_info "安装 iproute2 (ss 命令)..."
         if command -v apt-get &>/dev/null; then
             apt-get install -y -qq iproute2 2>/dev/null || true
+        elif command -v dnf &>/dev/null; then
+            dnf install -y -q iproute 2>/dev/null || true
         elif command -v yum &>/dev/null; then
             yum install -y -q iproute 2>/dev/null || true
+        elif command -v pacman &>/dev/null; then
+            pacman -Sy --noconfirm iproute2 2>/dev/null || true
+        elif command -v apk &>/dev/null; then
+            apk add --no-cache iproute2 2>/dev/null || true
         fi
     fi
 
@@ -98,12 +106,48 @@ check_env() {
     [[ -d "$HY2_BIN" ]] && rm -rf "$HY2_BIN"
     mkdir -p "$WORK_DIR" "$XRAY_DIR"
 
-    # 安装 jb 管理工具（若存在 jb_improved.sh）
-    if [[ -f "$SCRIPT_DIR/jb_improved.sh" && ! -e /usr/local/bin/jb ]]; then
-        if install -m 0755 "$SCRIPT_DIR/jb_improved.sh" /usr/local/bin/jb 2>/dev/null; then
-            _log_info "管理工具已安装: 可使用 'jb status' / 'jb logs xray' 等命令"
+    # 安装 jb 管理工具（本地有则复制，否则从仓库拉取）
+    install_jb_tool
+}
+
+# ==========================================
+# 安装 jb 管理工具
+# common.sh 与 jb 一起装到 /usr/local/lib/jiaoben/，
+# /usr/local/bin/jb 为包装脚本，保证脱离源码目录也能运行。
+# ==========================================
+install_jb_tool() {
+    local libdir="/usr/local/lib/jiaoben"
+    local src_jb="" src_common=""
+
+    if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/jb_improved.sh" && -f "$SCRIPT_DIR/common.sh" ]]; then
+        src_jb="$SCRIPT_DIR/jb_improved.sh"
+        src_common="$SCRIPT_DIR/common.sh"
+    else
+        # 以 bash <(curl ...) 方式运行时本地没有源码，尝试从仓库获取
+        local tmpd; tmpd=$(mktemp -d 2>/dev/null) || return 0
+        if curl -fsSL --connect-timeout 10 "${REPO_RAW}/jb_improved.sh" -o "$tmpd/jb_improved.sh" 2>/dev/null && \
+           curl -fsSL --connect-timeout 10 "${REPO_RAW}/common.sh" -o "$tmpd/common.sh" 2>/dev/null && \
+           [[ -s "$tmpd/jb_improved.sh" && -s "$tmpd/common.sh" ]]; then
+            src_jb="$tmpd/jb_improved.sh"
+            src_common="$tmpd/common.sh"
+        else
+            rm -rf "$tmpd"
+            _log_warn "未能获取 jb 管理工具（可稍后手动安装），继续部署"
+            return 0
         fi
     fi
+
+    mkdir -p "$libdir"
+    install -m 0755 "$src_jb" "$libdir/jb_improved.sh" 2>/dev/null || return 0
+    install -m 0644 "$src_common" "$libdir/common.sh" 2>/dev/null || return 0
+
+    cat > /usr/local/bin/jb <<'JBEOF'
+#!/usr/bin/env bash
+# jiaoben 管理工具包装脚本
+exec /usr/local/lib/jiaoben/jb_improved.sh "$@"
+JBEOF
+    chmod 0755 /usr/local/bin/jb 2>/dev/null || true
+    _log_info "管理工具已安装: 可使用 'jb status' / 'jb logs xray' / 'jb nodes'"
 }
 
 # ==========================================
@@ -194,12 +238,29 @@ download_file() {
 # ==========================================
 install_deps() {
     _log_info "检查安装依赖..."
+    # shellcheck disable=SC2086
     local pkgs="curl wget unzip jq openssl coreutils"
     if command -v apt-get &>/dev/null; then
         apt-get update -qq 2>/dev/null || true
         apt-get install -y -qq $pkgs 2>/dev/null || true
+    elif command -v dnf &>/dev/null; then
+        dnf install -y -q $pkgs 2>/dev/null || true
     elif command -v yum &>/dev/null; then
         yum install -y -q $pkgs 2>/dev/null || true
+    elif command -v zypper &>/dev/null; then
+        zypper --non-interactive install $pkgs 2>/dev/null || true
+    elif command -v pacman &>/dev/null; then
+        pacman -Sy --noconfirm $pkgs 2>/dev/null || true
+    elif command -v apk &>/dev/null; then
+        apk add --no-cache $pkgs 2>/dev/null || true
+    else
+        _log_warn "未识别的包管理器，请手动确保已安装: $pkgs"
+    fi
+
+    # jq 是硬依赖（获取版本号、合并 Argo 配置都要用）
+    if ! command -v jq &>/dev/null; then
+        _log_error "缺少必需依赖 jq，请手动安装后重试"
+        exit 1
     fi
 }
 
@@ -379,19 +440,56 @@ gen_hex() {
 # ==========================================
 # 节点信息管理
 # ==========================================
-_init_nodes_file() { mkdir -p "$WORKDIR_BASE"; [[ ! -f "$NODES_FILE" ]] && echo "# jiaoben 节点信息" > "$NODES_FILE" || true; }
+# 说明：节点以 TSV（协议名<TAB>链接）存储于 NODES_DB，
+# INFO_FILE 是由 NODES_DB 渲染出的可读文件（供 print_nodes / jb nodes 使用）。
+# 同名协议重复部署时执行「覆盖」而非追加，单独部署某协议也不会清掉其它协议。
+NODES_DB="${WORKDIR_BASE}/nodes.tsv"
 
+_init_nodes_file() {
+    mkdir -p "$WORKDIR_BASE"
+    [[ -f "$NODES_DB" ]] || : > "$NODES_DB"
+}
+
+# 由 NODES_DB 重新渲染 INFO_FILE
+render_nodes_file() {
+    _init_nodes_file
+    {
+        echo "# jiaoben 节点信息 - $(date '+%Y-%m-%d %H:%M:%S')"
+        local name link
+        while IFS=$'\t' read -r name link; do
+            [[ -n "$name" && -n "$link" ]] || continue
+            echo ""
+            echo "┌─────────────────────────────────────────────"
+            echo "│ $name"
+            echo "├─────────────────────────────────────────────"
+            echo "$link"
+            echo "└─────────────────────────────────────────────"
+        done < "$NODES_DB"
+    } > "$NODES_FILE"
+    chmod 600 "$NODES_FILE" 2>/dev/null || true
+    chmod 600 "$NODES_DB" 2>/dev/null || true
+}
+
+# 新增/覆盖一个节点（按协议名去重）
 append_node() {
     local name="$1" link="$2"
     _init_nodes_file
-    {
-        echo ""
-        echo "┌─────────────────────────────────────────────"
-        echo "│ $name"
-        echo "├─────────────────────────────────────────────"
-        echo "$link"
-        echo "└─────────────────────────────────────────────"
-    } >> "$NODES_FILE"
+    local tmp="${NODES_DB}.tmp.$$"
+    # 剔除同名旧记录
+    awk -F'\t' -v n="$name" 'NF && $1 != n' "$NODES_DB" > "$tmp" 2>/dev/null || : > "$tmp"
+    printf '%s\t%s\n' "$name" "$link" >> "$tmp"
+    mv -f "$tmp" "$NODES_DB"
+    render_nodes_file
+}
+
+# 删除指定协议的节点记录
+remove_node() {
+    local name="$1"
+    [[ -f "$NODES_DB" ]] || return 0
+    local tmp="${NODES_DB}.tmp.$$"
+    awk -F'\t' -v n="$name" 'NF && $1 != n' "$NODES_DB" > "$tmp" 2>/dev/null || : > "$tmp"
+    mv -f "$tmp" "$NODES_DB"
+    render_nodes_file
 }
 
 print_nodes() {
@@ -448,7 +546,7 @@ deploy_hy2() {
     # --- 端口配置 ---
     local port=""
     while true; do
-        read -p "监听端口（回车随机 10000-59999）: " port
+        read -r -p "监听端口（回车随机 10000-59999）: " port
         if [[ -z "$port" ]]; then
             port=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d '[:space:]')
             port=$(( port % 50000 + 10000 ))
@@ -468,19 +566,19 @@ deploy_hy2() {
     local port_hop_enabled="no" port_hop_range="" port_hop_interval="25s"
     local listen_addr=":${port}" firewall_port_range="$port"
 
-    read -p "是否开启端口跳跃 [y/N]: " hop_choice
+    read -r -p "是否开启端口跳跃 [y/N]: " hop_choice
     [[ "$(echo "$hop_choice" | tr '[:upper:]' '[:lower:]')" =~ ^y(es)?$ ]] && port_hop_enabled="yes"
 
     if [[ "$port_hop_enabled" == "yes" ]]; then
         local default_port_end=$((port + 75)) port_end
         [[ $default_port_end -gt 65535 ]] && default_port_end=65535
         while true; do
-            read -p "跳跃结束端口（起始 $port，默认 $default_port_end）: " port_end
+            read -r -p "跳跃结束端口（起始 $port，默认 $default_port_end）: " port_end
             port_end="${port_end:-$default_port_end}"
             [[ "$port_end" =~ ^[0-9]+$ && $port_end -gt $port && $port_end -le 65535 ]] && break
             _log_warn "结束端口须大于 $port 且不超过 65535"
         done
-        read -p "跳跃间隔（默认 25s）: " hop_interval
+        read -r -p "跳跃间隔（默认 25s）: " hop_interval
         port_hop_interval="${hop_interval:-25s}"
         port_hop_range="${port}-${port_end}"
         # 注意: Hysteria2 服务端始终监听单一端口，端口跳跃靠 NAT 把区间重定向到该端口
@@ -501,7 +599,7 @@ deploy_hy2() {
     echo ""
 
     while true; do
-        read -p "请选择 [1-3]（默认 1）: " cert_choice
+        read -r -p "请选择 [1-3]（默认 1）: " cert_choice
         cert_choice="${cert_choice:-1}"
         case "$cert_choice" in
             1)
@@ -522,14 +620,14 @@ deploy_hy2() {
                 cert_method="acme"
                 _log_warn "⚠ CDN 代理会导致 ACME 验证失败！"
                 while true; do
-                    read -p "域名（需已解析到本机）: " acme_domain
+                    read -r -p "域名（需已解析到本机）: " acme_domain
                     [[ "$acme_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]+)?(\.[a-zA-Z]{2,})$ ]] || { _log_warn "格式不正确"; continue; }
                     local resolved
                     resolved=$(dig +short "$acme_domain" 2>/dev/null | tail -1 || \
                                 nslookup "$acme_domain" 2>/dev/null | grep -oP 'Address:\s*\K[0-9.]+' | tail -1 || echo "")
                     if [[ -z "$resolved" ]]; then
                         _log_warn "域名 $acme_domain 无法解析，ACME 可能失败"
-                        read -p "继续？[y/N]: " cont
+                        read -r -p "继续？[y/N]: " cont
                         [[ "$(echo "$cont" | tr '[:upper:]' '[:lower:]')" =~ ^y(es)?$ ]] || continue 2
                     else
                         _log_info "解析: $resolved"
@@ -537,7 +635,7 @@ deploy_hy2() {
                     break
                 done
                 while true; do
-                    read -p "邮箱: " acme_email
+                    read -r -p "邮箱: " acme_email
                     [[ "$acme_email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] && break
                     _log_warn "邮箱格式不正确"
                 done
@@ -546,12 +644,12 @@ deploy_hy2() {
             3)
                 cert_method="custom"
                 while true; do
-                    read -p "证书文件路径 (.crt/.pem): " cert_file
+                    read -r -p "证书文件路径 (.crt/.pem): " cert_file
                     [[ -n "$cert_file" && -f "$cert_file" ]] && break
                     _log_warn "文件不存在"
                 done
                 while true; do
-                    read -p "私钥文件路径 (.key): " key_file
+                    read -r -p "私钥文件路径 (.key): " key_file
                     [[ -n "$key_file" && -f "$key_file" ]] && break
                     _log_warn "文件不存在"
                 done
@@ -570,7 +668,7 @@ deploy_hy2() {
     echo " 1) 限速 100 Mbps"
     echo " 2) 不限速"
     while true; do
-        read -p "请选择 [1-2]（默认 2）: " speed_choice
+        read -r -p "请选择 [1-2]（默认 2）: " speed_choice
         speed_choice="${speed_choice:-2}"
         case "$speed_choice" in
             1) limit_speed="yes"; speed_up="100"; speed_down="100"; _log_info "限速 100 Mbps"; break ;;
@@ -682,9 +780,22 @@ EOF
     systemctl enable --now jiaoben-hy2
 
     # 节点链接
-    local link_sni="${sni:-www.bing.com}"
-    local hy2_link="hysteria2://${pass}@${link_sni}:${port}?insecure=${insecure:-0}&sni=${link_sni}#Hysteria2"
-    [[ "$port_hop_enabled" == "yes" ]] && hy2_link="${hy2_link}&mport=${port_hop_range}"
+    # 主机部分必须是服务器可达地址：
+    #   - ACME 模式：域名已解析到本机，直接用域名
+    #   - 自签/自定义证书：用公网 IP（伪装域名只放进 sni 参数）
+    local link_host link_sni
+    link_sni="${sni:-www.bing.com}"
+    if [[ "$cert_method" == "acme" ]]; then
+        link_host="$acme_domain"
+    else
+        local pub_ip; pub_ip=$(get_public_ip)
+        link_host=$(fmt_host "$pub_ip")
+    fi
+
+    # 查询参数先拼好，最后再接 #备注，避免参数落入 fragment
+    local hy2_query="insecure=${insecure:-0}&sni=${link_sni}"
+    [[ "$port_hop_enabled" == "yes" ]] && hy2_query="${hy2_query}&mport=${port_hop_range}"
+    local hy2_link="hysteria2://${pass}@${link_host}:${port}?${hy2_query}#Hysteria2"
 
     append_node "Hysteria2" "$hy2_link"
     _log_success "Hysteria2 部署完成！"
@@ -742,9 +853,9 @@ deploy_core() {
     local mode="$1"
     install_deps
 
-    # mode 4 不清空节点文件
+    # 节点记录按协议名去重覆盖（见 append_node），无需清空整个文件
     mkdir -p "$WORKDIR_BASE"
-    [[ "$mode" -eq 4 ]] || : > "$NODES_FILE"
+    _init_nodes_file
 
     # ==================== REALITY ====================
     if [[ "$mode" -eq 1 || "$mode" -eq 4 ]]; then
@@ -826,7 +937,7 @@ EOF
 
         local argo_port=""
         while true; do
-            read -p "Argo 本地端口（回车随机 20000-59999）: " argo_port
+            read -r -p "Argo 本地端口（回车随机 20000-59999）: " argo_port
             if [[ -z "$argo_port" ]]; then
                 argo_port=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d '[:space:]')
                 argo_port=$(( argo_port % 40000 + 20000 ))
@@ -843,13 +954,15 @@ EOF
 
         backup_config
 
-        # 如果已有 config（一键部署合并），追加 inbound 而不是覆盖
+        # 如果已有 config（一键部署合并），先剔除旧的 ws inbound 再追加，避免无限累积/端口冲突
         if [[ -f "$XRAY_CONFIG" ]] && jq -e '.inbounds[0]' "$XRAY_CONFIG" &>/dev/null; then
             local tmp_json
-            tmp_json=$(jq --argjson port $argo_port --arg uuid "$uuid" --arg path "$path" '
-                .inbounds += [{
+            tmp_json=$(jq --argjson port "$argo_port" --arg uuid "$uuid" --arg path "$path" '
+                .inbounds |= map(select((.streamSettings.network // "") != "ws"))
+                | .inbounds += [{
                     "port": $port,
                     "protocol": "vless",
+                    "tag": "argo-ws",
                     "settings": {
                         "clients": [{ "id": $uuid }],
                         "decryption": "none"
@@ -860,8 +973,8 @@ EOF
                     },
                     "sniffing": { "enabled": true, "destOverride": ["http","tls"] }
                 }]
-            ' "$XRAY_CONFIG")
-            echo "$tmp_json" > "$XRAY_CONFIG"
+            ' "$XRAY_CONFIG") || { _log_error "合并 Argo 配置失败"; exit 1; }
+            printf '%s\n' "$tmp_json" > "$XRAY_CONFIG"
         else
             cat > "$XRAY_CONFIG" <<EOF
 {
@@ -923,6 +1036,9 @@ WantedBy=multi-user.target
 EOF
 
         systemctl daemon-reload
+        # 清空旧日志，避免 get_argo_domain 读到上一次部署的过期域名
+        : > "${WORK_DIR}/argo.log"
+        systemctl stop jiaoben-argo 2>/dev/null || true
         systemctl enable --now jiaoben-argo
 
         _log_info "等待 Argo 隧道建立（最多 20 秒）..."
@@ -987,8 +1103,10 @@ uninstall_all() {
     echo "  • 所有 systemd 服务"
     echo "  • 工作目录: $WORK_DIR"
     echo "  • 配置文件和密钥"
+    echo "  • 本脚本添加的防火墙规则"
+    echo "  • 管理工具 /usr/local/bin/jb"
     echo ""
-    read -p "确认卸载？输入 yes 确认: " confirm
+    read -r -p "确认卸载？输入 yes 确认: " confirm
     [[ "$confirm" != "yes" ]] && { _log_info "已取消"; return; }
 
     _log_info "正在卸载..."
@@ -1002,24 +1120,58 @@ uninstall_all() {
         fi
     done
 
-    # 终止残留进程（修复 pkill 拼写）
-    local proc
-    for proc in cloudflared xray hysteria; do
-        if pgrep -f "$proc" &>/dev/null; then
-            _log_info "终止残留进程: $proc"
-            if command -v pkill &>/dev/null; then
-                pkill -9 -f "$proc" 2>/dev/null || true
-            elif command -v killall &>/dev/null; then
-                killall -9 "$proc" 2>/dev/null || true
-            else
-                pgrep -f "$proc" | xargs -r kill -9 2>/dev/null || true
-            fi
+    # 终止残留进程：只匹配本脚本安装的二进制路径，避免误杀用户自建实例
+    local bin
+    for bin in "$ARGO_BIN" "$XRAY_BIN" "$HY2_BIN"; do
+        [[ -n "$bin" ]] || continue
+        if pgrep -f "^${bin}" >/dev/null 2>&1; then
+            _log_info "终止残留进程: $bin"
+            pkill -9 -f "^${bin}" 2>/dev/null || \
+                pgrep -f "^${bin}" | xargs -r kill -9 2>/dev/null || true
         fi
     done
+
+    # 清理本脚本添加的防火墙规则
+    cleanup_firewall_rules
+
+    # 移除管理工具
+    rm -f /usr/local/bin/jb
+    rm -rf /usr/local/lib/jiaoben
 
     rm -rf "$WORK_DIR"
     systemctl daemon-reload
     _log_success "已彻底卸载"
+}
+
+# ==========================================
+# 清理防火墙规则（尽力而为，失败不阻塞卸载）
+# ==========================================
+cleanup_firewall_rules() {
+    _log_info "清理防火墙规则..."
+    # 删除 REALITY 的 TCP 443 与端口跳跃 DNAT
+    if command -v iptables &>/dev/null; then
+        iptables -D INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+        # 逐条删除本脚本添加的 UDP ACCEPT 与 nat DNAT
+        local rule
+        while read -r rule; do
+            [[ -n "$rule" ]] || continue
+            # shellcheck disable=SC2086
+            iptables -D INPUT $rule 2>/dev/null || true
+        done <<< "$(iptables -S INPUT 2>/dev/null | grep -E '^-A INPUT -p udp .*--dport [0-9:]+ -j ACCEPT' | sed 's/^-A INPUT //')"
+        while read -r rule; do
+            [[ -n "$rule" ]] || continue
+            # shellcheck disable=SC2086
+            iptables -t nat -D PREROUTING $rule 2>/dev/null || true
+        done <<< "$(iptables -t nat -S PREROUTING 2>/dev/null | grep -E '^-A PREROUTING -p udp .*-j DNAT' | sed 's/^-A PREROUTING //')"
+        if command -v iptables-save &>/dev/null; then
+            if [[ -d /etc/iptables ]]; then
+                iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            elif command -v netfilter-persistent &>/dev/null; then
+                netfilter-persistent save 2>/dev/null || true
+            fi
+        fi
+    fi
+    _log_info "防火墙规则清理完成（如有自定义规则请手动核对）"
 }
 
 # ==========================================
@@ -1039,19 +1191,19 @@ main_menu() {
     echo "7. 彻底卸载"
     echo "0. 退出"
     echo -e "${CYAN}=========================================${NC}"
-    read -p "请选择 [0-7]: " choice
+    read -r -p "请选择 [0-7]: " choice
 
     case $choice in
         1) deploy_core 1 ;;
         2) deploy_core 2 ;;
         3) deploy_core 3 ;;
-        4) : > "$NODES_FILE"; deploy_core 4 ;;
+        4) deploy_core 4 ;;
         5) print_nodes ;;
         6)
             echo ""
             echo "1) 重启所有服务"
             echo "2) 停止所有服务"
-            read -p "请选择 [1-2]: " sub
+            read -r -p "请选择 [1-2]: " sub
             case $sub in
                 1) restart_services ;;
                 2) stop_services ;;

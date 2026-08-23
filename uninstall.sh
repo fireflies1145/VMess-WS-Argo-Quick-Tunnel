@@ -75,19 +75,16 @@ remove_service_files() {
 # ==========================================
 cleanup_processes() {
     _info "正在清理残留进程..."
-    local processes=("xray" "hysteria" "cloudflared")
+    # 只匹配本脚本安装目录下的二进制，避免误杀用户自建实例
+    local bins="$WORK_DIR/xray/xray $WORK_DIR/hysteria $WORK_DIR/cloudflared"
 
-    for process in "${processes[@]}"; do
-        if pgrep -f "$process" >/dev/null 2>&1; then
-            _info "终止进程: $process"
-            # 使用正确的 pkill 命令，fallback 到 killall
+    for bin in $bins; do
+        if pgrep -f "^${bin}" >/dev/null 2>&1; then
+            _info "终止进程: $bin"
             if command -v pkill &>/dev/null; then
-                pkill -9 -f "$process" 2>/dev/null || true
-            elif command -v killall &>/dev/null; then
-                killall -9 "$process" 2>/dev/null || true
+                pkill -9 -f "^${bin}" 2>/dev/null || true
             else
-                # 最后的 fallback
-                pgrep -f "$process" | xargs -r kill -9 2>/dev/null || true
+                pgrep -f "^${bin}" | xargs -r kill -9 2>/dev/null || true
             fi
         fi
     done
@@ -119,6 +116,10 @@ remove_management_tool() {
         _success "管理工具已删除"
     else
         _warn "管理工具不存在: $MGMT_TOOL"
+    fi
+    if [[ -d /usr/local/lib/jiaoben ]]; then
+        _info "删除: /usr/local/lib/jiaoben"
+        rm -rf /usr/local/lib/jiaoben 2>/dev/null || _warn "无法删除 /usr/local/lib/jiaoben"
     fi
 }
 
